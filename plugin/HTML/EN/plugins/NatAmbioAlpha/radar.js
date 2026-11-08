@@ -11,6 +11,7 @@ const controls = {
 const inputs = new Map();
 const player = document.querySelector("#player");
 const status = document.querySelector("#status");
+const renderAhead = document.querySelector("#render-ahead");
 const canvas = document.querySelector("#radar");
 const ctx = canvas.getContext("2d");
 const pending = new Map();
@@ -101,17 +102,30 @@ async function refresh() {
             showValue(input);
         }
         telemetry = result.telemetry || {};
-        const ahead = telemetry.bufferAhead >= .1 ? ` · ${telemetry.bufferAhead.toFixed(1)} s rendered ahead` : "";
-        status.textContent = !result.available ? "DSP helper or SoX unavailable" :
+        const applied = Number.isFinite(telemetry.settingsAppliedAt) && !telemetry.settingsPending;
+        const message = !result.available ? "DSP helper or SoX unavailable" :
             !settings.enabled ? "Alpha disabled" :
-            telemetry.settingsPending ? "Setting change queued for playback" + ahead :
-            telemetry.rate ? "Following player" + ahead : "Alpha enabled · waiting for a processed stream";
+            telemetry.settingsPending ? "Setting change queued for playback" :
+            applied ? `Settings applied at ${playbackTime(telemetry.settingsAppliedAt)}` :
+            telemetry.rate ? "Following player" : "Alpha enabled · waiting for a processed stream";
+        if (status.textContent !== message) status.textContent = message;
+        status.classList.toggle("applied", Boolean(result.available && settings.enabled && applied));
+        if (renderAhead) {
+            renderAhead.textContent = telemetry.bufferAhead >= .1
+                ? `${telemetry.bufferAhead.toFixed(1)} s rendered ahead` : "";
+        }
         updateReadouts();
     } catch {
         if (player.value === id) status.textContent = "Lyrion connection unavailable";
     } finally {
         busy = false;
     }
+}
+
+function playbackTime(seconds) {
+    const tenths = Math.round(seconds * 10);
+    const minutes = Math.floor(tenths / 600);
+    return `${minutes}:${((tenths % 600) / 10).toFixed(1).padStart(4, "0")}`;
 }
 
 function updateReadouts() {
@@ -228,6 +242,8 @@ expand.addEventListener("click", () => {
 });
 player.addEventListener("change", () => {
     telemetry = {};
+    if (renderAhead) renderAhead.textContent = "";
+    status.classList.remove("applied");
     for (const input of inputs.values()) input.disabled = true;
     refresh();
 });

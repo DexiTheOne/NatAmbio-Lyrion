@@ -353,6 +353,7 @@ private:
             emit(1, wetRight[i], dryFrame[1]);
             if (outputRevision != pendingRevision && revisionDelay > 0 && --revisionDelay == 0) {
                 outputRevision = pendingRevision;
+                appliedFrame = framesRendered;
                 outputGeometry = config.xtc;
             }
             if (peakHold > 0)
@@ -401,6 +402,7 @@ private:
         const auto slot = framesRendered / reportInterval();
         json << "{\"rate\":" << rate << ",\"frames\":" << framesRendered
              << ",\"slot\":" << slot << ",\"revision\":" << outputRevision
+             << ",\"appliedFrame\":" << appliedFrame
              << ",\"azimuth\":" << outputGeometry.azimuth_deg
              << ",\"itd\":" << outputGeometry.itd_us
              << ",\"ild\":" << outputGeometry.ild_db
@@ -456,6 +458,7 @@ private:
     double peakRelease = 0, rmsAttack = 0, rmsRelease = 0;
     int peakHold = 0;
     bool clipped = false;
+    std::uint64_t appliedFrame = 0;
     std::uint64_t previousSlot = std::numeric_limits<std::uint64_t>::max();
     int outputRevision = 0, pendingRevision = 0, revisionDelay = 0;
     std::uint64_t framesRendered = 0, nextReport = 0, nextSettingsRead = 0, overBudget = 0;
@@ -466,7 +469,7 @@ private:
 int main(int argc, char** argv)
 {
     if (argc == 2 && std::string(argv[1]) == "--version") {
-        std::cout << "NatAmbio Alpha 0.1.4\n";
+        std::cout << "NatAmbio Alpha 0.1.5\n";
         return 0;
     }
     if (argc < 2) {

@@ -5,6 +5,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 
 binary = sys.argv[1]
 
@@ -82,3 +83,34 @@ with tempfile.TemporaryDirectory() as tmp:
     assert latest["peak"] > 0
     assert latest["revision"] == before["revision"] == 17
     assert latest["azimuth"] == before["azimuth"] == 22
+
+    settings.write_text("reset 1\nrevision 17\n")
+    track = au(wave(rate, rate // 3), rate)
+    split = 24 + 1536 * 4
+    live_path = base.with_suffix(".222.timeline")
+    with subprocess.Popen([binary, str(base), "--stream=222"], stdin=subprocess.PIPE,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE) as live:
+        live.stdin.write(track[:split])
+        live.stdin.flush()
+        for _ in range(100):
+            if live_path.exists() and live_path.stat().st_size >= 1024:
+                break
+            time.sleep(.01)
+        else:
+            live.kill()
+            raise AssertionError("First telemetry record was not rendered")
+        settings.write_text("reset 1\nrevision 18\ntrim -6\n")
+        output, errors = live.communicate(track[split:], timeout=10)
+        assert live.returncode == 0, errors
+        assert len(output) == 32 + rate // 3 * 6
+    records = live_path.read_bytes()
+    latest = json.loads(records[:512])
+    initial = json.loads(records[512:1024])
+    assert initial["revision"] == 17 and initial["appliedFrame"] == 0
+    assert latest["revision"] == 18 and 0 < latest["appliedFrame"] < latest["frames"]
+    for offset in range(512, len(records), 512):
+        record = json.loads(records[offset:offset + 512])
+        if record["frames"] <= latest["appliedFrame"]:
+            assert record["revision"] == 17
+        else:
+            assert record["revision"] == 18 and record["appliedFrame"] == latest["appliedFrame"]

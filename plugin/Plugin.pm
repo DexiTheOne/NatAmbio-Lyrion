@@ -251,7 +251,8 @@ sub playbackTelemetry {
     return unless open my $fh, '<:raw', "$base.$stream.timeline";
     my $latest = timelineRecord($fh, 0) or return;
     my $rate = $latest->{rate} or return;
-    my $elapsed = ($controller->playingSongElapsed || 0) - ($song->startOffset || 0);
+    my $start = $song->startOffset || 0;
+    my $elapsed = ($controller->playingSongElapsed || 0) - $start;
     my $frames = int(($elapsed > 0 ? $elapsed : 0) * $rate);
     my $interval = int(($rate + 29) / 30);
     my $slot = int($frames / $interval);
@@ -264,6 +265,9 @@ sub playbackTelemetry {
     return unless $telemetry && $telemetry->{slot} == $slot;
     $telemetry->{bufferAhead} = $latest->{frames} > $frames ? ($latest->{frames} - $frames) / $rate : 0;
     $telemetry->{settingsPending} = ($revision{$base} || 0) != $telemetry->{revision} ? 1 : 0;
+    if (!$telemetry->{settingsPending} && $telemetry->{revision} && defined $telemetry->{appliedFrame}) {
+        $telemetry->{settingsAppliedAt} = $start + $telemetry->{appliedFrame} / $rate;
+    }
     # Cached dashboards from before playhead alignment expect a freshness field.
     $telemetry->{age} = 0;
     return $telemetry;

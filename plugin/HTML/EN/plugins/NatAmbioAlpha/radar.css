@@ -46,5 +46,7 @@ details [data-control] { margin-top: 12px }
 footer { display: flex; flex-wrap: wrap; align-items: center; gap: 7px 16px; padding: 13px 8px 3px; font-size: 12px }
 footer select { max-width: 180px; margin-left: 5px }
 #status { color: #d1ccbc }
+#status.applied { color: #bad6a6 }
+#render-ahead { color: #a9a395 }
 @media (max-width: 750px) { .expanded .workspace { grid-template-columns: 1fr } .technical { gap: 10px } header { flex-wrap: wrap; gap: 12px } .technical { justify-content: flex-start } }
 @media (max-width: 400px) { .panel { padding-inline: 12px } .controls { gap: 7px } }

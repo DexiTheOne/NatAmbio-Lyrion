@@ -21,7 +21,7 @@ The chevron opens the PCA field and technical readouts. Under **DSP options**, N
 
 CPU is the DSP thread's compute time as a share of the audio block budget, averaged over about one second. XRUN counts helper blocks whose elapsed time exceeded their budget. The peak readout follows the processed signal and turns red if the track clips. RESPONSE adjusts the PCA field while the speaker halos follow their own faster level envelope.
 
-Radar2 selects recorded DSP snapshots using the player's Lyrion playhead. The page shows the estimated render lead and indicates when live settings are queued behind buffered audio. Changes affect audio rendered after the edit. Exact display alignment depends on the timing reported by the player.
+Radar2 selects recorded DSP snapshots using the player's Lyrion playhead. The page shows the estimated render lead and indicates when live settings are queued behind buffered audio. Once the player reaches the revised audio, the status shows the track position where the settings applied. Changes affect audio rendered after the edit. Exact display alignment depends on the timing reported by the player.
 
 ## Build and package
 
@@ -29,7 +29,7 @@ Radar2 selects recorded DSP snapshots using the player's Lyrion playhead. The pa
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
-python3 tools/package.py build/natambio-alpha https://example.org/releases/download/v0.1.4
+python3 tools/package.py build/natambio-alpha https://example.org/releases/download/v0.1.5
 ```
 
 The package script writes a versioned ZIP and Lyrion repository XML with its SHA-1 checksum. Tagging a commit with the version in `plugin/install.xml` builds and publishes both release assets on GitHub.
