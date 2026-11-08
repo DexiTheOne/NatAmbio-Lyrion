@@ -11,11 +11,11 @@ Server-side stereo NAE and XTC processing for Lyrion Music Server 9 on Linux x86
 2. Enable **NatAmbio Alpha**, apply, and restart Lyrion when prompted.
 3. Open **NatAmbio Alpha** from the Lyrion web interface's plugins section. Select a player and turn on **Enable Alpha**. Start a new track to use the new conversion path.
 
-The player needs to accept lossless FLAC, and the server needs Lyrion's bundled SoX or a compatible SoX on its path. Local FLAC, WAV, AIFF, MP3, and Ogg Vorbis can use the DSP route. Actual decoding support follows the server's SoX build. Keep the target player independent of sync groups for the initial release. For a source that still plays natively, check Lyrion's File Types settings and the player's supported formats. The expanded panel shows whether the helper is rendering.
+The player needs to accept lossless FLAC, and the server needs Lyrion's bundled SoX or a compatible SoX on its path. Local FLAC, WAV, AIFF, MP3, and Ogg Vorbis can use the DSP route. Actual decoding support follows the server's SoX build. Keep the target player independent of sync groups for the initial release. For a source that still plays natively, check Lyrion's File Types settings and the player's supported formats. The dashboard shows whether the helper is rendering.
 
 ## Controls
 
-The chevron opens the PCA field and technical readouts. Under **DSP options**, NAE Bypass, XTC Bypass, and NAE Preamp work independently. Output Trim acts on the processed path and the master Bypass crossfades to delay-aligned dry audio. Window Blocks applies at the next stream because it changes latency.
+The dashboard fills the browser viewport and keeps the PCA field and technical readouts visible. The NAE and XTC sections each have a bypass switch, and the NAE section includes Preamp. Output Trim acts on the processed path and the master Bypass crossfades to delay-aligned dry audio. Window Blocks applies at the next stream because it changes latency.
 
 **Reset DSP history on new track** starts each track with a cold DSP state. With the toggle off, the helper replays up to one second of the previous same-rate track into the new engine before emitting audio. The replay preserves block alignment and warms covariance and convolution history. Each track is independently latency-compensated and drained, so exact gapless parity with a single continuous VST render is outside this initial implementation. A seek, stop, or change of sample rate starts fresh.
 
@@ -29,7 +29,7 @@ Radar2 selects recorded DSP snapshots using the player's Lyrion playhead. The pa
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
-python3 tools/package.py build/natambio-alpha https://example.org/releases/download/v0.1.5
+python3 tools/package.py build/natambio-alpha https://example.org/releases/download/v0.1.6
 ```
 
 The package script writes a versioned ZIP and Lyrion repository XML with its SHA-1 checksum. Tagging a commit with the version in `plugin/install.xml` builds and publishes both release assets on GitHub.

@@ -6,7 +6,7 @@ const controls = {
     azimuth: ["AZIMUTH", 10, 30, 1, "°"], itd: ["ITD", 80, 300, 5, " µs"],
     alpha: ["ILD ALPHA", 1, 2.5, .1, ""], slope: ["BASS ROLLOFF", 60, 500, 1, " Hz"],
     trim: ["OUTPUT TRIM", -12, 6, .5, " dB"], response: ["RESPONSE", 0, 600, 10, " ms"],
-    preamp: ["PREAMP", -18, 0, .5, " dB"],
+    preamp: ["NAE PREAMP", -18, 0, .5, " dB"],
 };
 const inputs = new Map();
 const player = document.querySelector("#player");
@@ -14,9 +14,11 @@ const status = document.querySelector("#status");
 const renderAhead = document.querySelector("#render-ahead");
 const canvas = document.querySelector("#radar");
 const ctx = canvas.getContext("2d");
+const levelMeter = document.querySelector("#level");
 const pending = new Map();
 let settings = {};
 let telemetry = {};
+let sampledCpu = 0, sampledPeak = 0;
 let busy = false;
 let writeQueue = Promise.resolve();
 
@@ -29,8 +31,31 @@ function showValue(input) {
     const digits = key === "alpha" ? 2 : step < 1 ? 1 : 0;
     input.previousElementSibling.value = key === "response" && !value ? "RAW" :
         (key === "ild" ? -value : value).toFixed(digits) + unit;
-    const fill = key === "ild" ? 1 - (value - min) / (max - min) : (value - min) / (max - min);
-    input.style.setProperty("--position", `${fill * 100}%`);
+    const fill = (value - min) / (max - min);
+    if (key === "trim") {
+        input.parentElement.style.setProperty("--angle", `${fill * 270 - 135}deg`);
+    } else {
+        input.style.setProperty("--position", `${fill * 100}%`);
+    }
+}
+
+function enableKnobDrag(input, step) {
+    let startY, startValue;
+    input.addEventListener("pointerdown", event => {
+        if (!event.isPrimary || event.button !== 0 || input.disabled) return;
+        event.preventDefault();
+        input.focus();
+        input.setPointerCapture(event.pointerId);
+        startY = event.clientY;
+        startValue = input.valueAsNumber;
+    });
+    input.addEventListener("pointermove", event => {
+        if (input.disabled || !input.hasPointerCapture(event.pointerId)) return;
+        const value = input.valueAsNumber;
+        const steps = Math.round((startY - event.clientY) / 4);
+        input.valueAsNumber = startValue + steps * step;
+        if (input.valueAsNumber !== value) input.dispatchEvent(new Event("input", {bubbles: true}));
+    });
 }
 
 for (const node of document.querySelectorAll("[data-control]")) {
@@ -44,6 +69,7 @@ for (const node of document.querySelectorAll("[data-control]")) {
     range.dataset.setting = key;
     label.append(document.createTextNode(title), value, range);
     node.append(label);
+    if (key === "trim") enableKnobDrag(range, step);
 }
 for (const input of document.querySelectorAll("[data-setting]")) {
     const key = input.dataset.setting;
@@ -114,9 +140,14 @@ async function refresh() {
             renderAhead.textContent = telemetry.bufferAhead >= .1
                 ? `${telemetry.bufferAhead.toFixed(1)} s rendered ahead` : "";
         }
-        updateReadouts();
+        sampledCpu = telemetry.rate ? Math.max(sampledCpu, telemetry.cpu || 0) : 0;
+        sampledPeak = telemetry.rate ? Math.max(sampledPeak, telemetry.peak || 0) : 0;
     } catch {
-        if (player.value === id) status.textContent = "Lyrion connection unavailable";
+        if (player.value === id) {
+            telemetry = {};
+            sampledCpu = sampledPeak = 0;
+            status.textContent = "Lyrion connection unavailable";
+        }
     } finally {
         busy = false;
     }
@@ -128,16 +159,34 @@ function playbackTime(seconds) {
     return `${minutes}:${((tenths % 600) / 10).toFixed(1).padStart(4, "0")}`;
 }
 
-function updateReadouts() {
+const readoutInterval = 200;
+let lastReadout = 0;
+let displayedCpu = 0, displayedLevel = 0, targetLevel = 0;
+
+function easeMeter(value, target, elapsed) {
+    const time = target > value ? 65 : 420;
+    return value + (target - value) * -Math.expm1(-elapsed / time);
+}
+
+function updateReadouts(now) {
+    const elapsed = now - lastReadout;
+    if (elapsed < readoutInterval) return;
+    lastReadout = now;
+
+    // Keep the highest reported values between readouts while the radar follows each poll.
     const current = Boolean(telemetry.rate);
-    const peakDb = current ? 20 * Math.log10(Math.max(telemetry.peak, .000032)) : -90;
+    const peakDb = 20 * Math.log10(Math.max(sampledPeak, telemetry.peak || 0, .000032));
+    const targetCpu = Math.max(sampledCpu, telemetry.cpu || 0);
+    displayedCpu = current ? easeMeter(displayedCpu, targetCpu, elapsed) : 0;
+    targetLevel = current ? Math.max(0, Math.min(1, (peakDb + 60) / 60)) : 0;
+    sampledCpu = sampledPeak = 0;
+
     const display = {
-        cpu: current ? (100 * telemetry.cpu).toFixed(1) + "%" : "idle",
+        cpu: current ? (100 * displayedCpu).toFixed(1) + "%" : "idle",
         rate: current ? (telemetry.rate / 1000).toFixed(1) + " kHz" : "—",
         block: current ? telemetry.block + " smp" : "—",
         xrun: current ? telemetry.xrun : 0,
         peak: current ? peakDb.toFixed(1) + " dB" : "—",
-        level: Math.max(0, Math.min(1, (peakDb + 60) / 60)),
     };
     for (const [key, value] of Object.entries(display)) document.getElementById(key).value = value;
     document.getElementById("peak-label").classList.toggle("clipped", current && Boolean(telemetry.clipped));
@@ -147,9 +196,12 @@ let cloud = {angle: 0, spread: 1, opacity: 0, left: 0, right: 0};
 let lastPaint = 0;
 function paint(now) {
     requestAnimationFrame(paint);
-    if (canvas.closest("[hidden]") || now - lastPaint < 15) return;
+    if (now - lastPaint < 15) return;
     const dt = now - lastPaint;
     lastPaint = now;
+    displayedLevel = easeMeter(displayedLevel, targetLevel, dt);
+    levelMeter.value = displayedLevel;
+    updateReadouts(now);
     const width = canvas.clientWidth;
     const height = canvas.clientHeight;
     if (!width || !height) return;
@@ -160,8 +212,8 @@ function paint(now) {
     }
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     ctx.clearRect(0, 0, width, height);
-    const x = width / 2, y = height * .85;
     const radius = Math.min(width * .45, height * .72);
+    const x = width / 2, y = (height + radius) / 2;
     const theta = (telemetry.azimuth ?? settings.azimuth ?? 30) * Math.PI / 180;
     ctx.strokeStyle = "#d2cabd";
     for (let ring = 1; ring <= 5; ++ring) {
@@ -230,18 +282,9 @@ function paint(now) {
     ctx.beginPath(); ctx.arc(x, y, 4, 0, 2 * Math.PI); ctx.fill();
 }
 
-const expand = document.querySelector("#expand");
-expand.addEventListener("click", () => {
-    const open = expand.getAttribute("aria-expanded") !== "true";
-    expand.setAttribute("aria-expanded", open);
-    expand.setAttribute("aria-label", open ? "Hide technical view" : "Show technical view");
-    expand.textContent = open ? "‹" : "›";
-    document.querySelector("#field").hidden = !open;
-    document.querySelector("#technical").hidden = !open;
-    document.querySelector("#instrument").classList.toggle("expanded", open);
-});
 player.addEventListener("change", () => {
     telemetry = {};
+    sampledCpu = sampledPeak = displayedCpu = displayedLevel = targetLevel = 0;
     if (renderAhead) renderAhead.textContent = "";
     status.classList.remove("applied");
     for (const input of inputs.values()) input.disabled = true;
@@ -262,7 +305,7 @@ player.addEventListener("change", () => {
 })();
 async function poll() {
     await refresh();
-    setTimeout(poll, document.querySelector("#technical").hidden ? 250 : 50);
+    setTimeout(poll, 50);
 }
 setTimeout(poll, 50);
 requestAnimationFrame(paint);

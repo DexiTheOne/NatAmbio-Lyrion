@@ -4,17 +4,27 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NatAmbio Alpha</title>
-<link rel="stylesheet" href="radar.css?v=0.1.5">
-<script src="radar.js?v=0.1.5" defer></script>
+<link rel="stylesheet" href="radar.css?v=0.1.6">
+<script src="radar.js?v=0.1.6" defer></script>
 </head>
 <body>
 <main id="instrument" aria-label="NatAmbio Alpha">
   <header>
     <div class="wordmark"><h1>NatAmbio</h1><span>NATURAL AMBIENCE</span></div>
-    <div id="technical" class="technical" hidden>
-      <div data-control="trim"></div>
-      <label class="switch">BYPASS <input type="checkbox" data-setting="bypass"></label>
-      <div id="readouts">
+    <div class="technical">
+      <div class="header-switches header-box">
+        <label class="switch"><input class="toggle" type="checkbox" role="switch" data-setting="enabled"><span>Enable<br>Alpha</span></label>
+        <label class="switch"><input class="toggle" type="checkbox" role="switch" data-setting="bypass"><span>Bypass<br>All</span></label>
+      </div>
+      <div class="player-session header-box">
+        <label>Player <select id="player" aria-label="Lyrion player"></select></label>
+        <div class="player-messages">
+          <span id="status" role="status">Connecting to Lyrion…</span>
+          <span id="render-ahead"></span>
+        </div>
+      </div>
+      <div class="trim-knob header-box" data-control="trim"></div>
+      <div id="readouts" class="header-box">
         <span title="DSP thread CPU time as a share of the audio block budget">CPU <output id="cpu">idle</output></span>
         <span>SR <output id="rate">—</output></span>
         <span>BLOCK <output id="block">—</output></span>
@@ -27,40 +37,38 @@
   <div class="workspace">
     <div class="panel controls">
       <section class="nae">
-        <h2>NAE</h2>
+        <div class="section-heading">
+          <h2>NAE</h2>
+          <label class="switch">Bypass <input class="toggle" type="checkbox" role="switch" aria-label="NAE bypass" data-setting="nae_bypass"></label>
+        </div>
         <div class="faders"><div data-control="front"></div><div data-control="ambience"></div></div>
-        <div data-control="window"></div>
+        <div class="sliders">
+          <div data-control="preamp"></div>
+          <div data-control="window"></div>
+        </div>
       </section>
       <section class="xtc">
-        <h2>XTC</h2>
+        <div class="section-heading">
+          <h2>XTC</h2>
+          <label class="switch">Bypass <input class="toggle" type="checkbox" role="switch" aria-label="XTC bypass" data-setting="xtc_bypass"></label>
+        </div>
         <div class="sliders">
           <div data-control="ild"></div><div data-control="azimuth"></div>
           <div data-control="itd"></div><div data-control="alpha"></div>
           <div data-control="slope"></div>
         </div>
       </section>
-      <button id="expand" aria-expanded="false" aria-controls="field technical" aria-label="Show technical view">›</button>
     </div>
-    <section id="field" class="panel field" hidden>
+    <section class="panel field">
       <h2>NAE PCA FIELD</h2>
       <canvas id="radar" aria-label="Live principal direction and loudspeaker field"></canvas>
       <div class="response" data-control="response"></div>
-      <details>
-        <summary>DSP options</summary>
-        <div data-control="preamp"></div>
+      <div class="field-options">
         <label class="switch"><input type="checkbox" data-setting="reset"> Reset DSP history on new track</label>
-        <label class="switch"><input type="checkbox" data-setting="nae_bypass"> NAE bypass</label>
-        <label class="switch"><input type="checkbox" data-setting="xtc_bypass"> XTC bypass</label>
         <label class="switch"><input type="checkbox" data-setting="algorithm"> Corrected XTC</label>
-      </details>
+      </div>
     </section>
   </div>
-  <footer>
-    <label>Player <select id="player" aria-label="Lyrion player"></select></label>
-    <label class="switch"><input type="checkbox" data-setting="enabled"> Enable Alpha</label>
-    <span id="status" role="status">Connecting to Lyrion…</span>
-    <span id="render-ahead"></span>
-  </footer>
 </main>
 </body>
 </html>
