@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build the Lyrion ZIP and repository manifest for an immutable release."""
 import argparse
+import base64
 import hashlib
 from pathlib import Path
 import re
@@ -25,7 +26,7 @@ archive = args.output / f"NatAmbioAlpha-{version}.zip"
 files = {
     str(path.relative_to(root / "plugin")): path
     for path in (root / "plugin").rglob("*")
-    if path.is_file() and not path.name.startswith(".")
+    if path.is_file() and not path.name.startswith(".") and path.suffix != ".ttf"
 }
 files["LICENSE"] = root / "LICENSE"
 files["Bin/natambio-alpha"] = args.binary
@@ -34,7 +35,14 @@ with ZipFile(archive, "w", compression=ZIP_DEFLATED) as package:
         info = ZipInfo(f"NatAmbioAlpha/{name}")
         info.create_system = 3
         info.external_attr = (0o100755 if name.startswith("Bin/") else 0o100644) << 16
-        package.writestr(info, path.read_bytes(), compress_type=ZIP_DEFLATED)
+        data = path.read_bytes()
+        if path.name == "radar.css":
+            # Lyrion does not serve .ttf from a plugin's HTML path.
+            for font in path.parent.glob("*.ttf"):
+                encoded = base64.b64encode(font.read_bytes())
+                data = data.replace(f"url({font.name})".encode(),
+                                    b"url(data:font/ttf;base64," + encoded + b")")
+        package.writestr(info, data, compress_type=ZIP_DEFLATED)
 
 extensions = ET.Element("extensions")
 details = ET.SubElement(extensions, "details")
