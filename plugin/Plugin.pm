@@ -70,13 +70,27 @@ sub initPlugin {
     Slim::Control::Request::addDispatch(['natambioalpha', 'set', '_key', '_value'], [1, 0, 0, \&setControl]);
     installSongHook() if $ready;
     Slim::Web::Pages->addPageLinks('plugins', { PLUGIN_NATAMBIO_ALPHA => $page });
-    Slim::Web::Pages->addPageFunction(qr{^plugins/NatAmbioAlpha/index\.html$}, sub {
-        return Slim::Web::HTTP::filltemplatefile($page, $_[1]);
-    });
+    Slim::Web::Pages->addPageFunction(qr{^plugins/NatAmbioAlpha/index\.html$}, \&dashboardPage);
 
     for my $client (Slim::Player::Client::clients()) {
         configurePlayer($client);
     }
+}
+
+sub dashboardPage {
+    my (undef, undef, undef, undef, $response) = @_;
+    $response->header('Cache-Control' => 'no-store');
+    # This page is static. Reading it directly avoids serving a compiled
+    # Template Toolkit page from an older installed plugin ZIP.
+    my $path = catfile(dirname(__FILE__), 'HTML', 'EN', split m{/}, $page);
+    if (open my $fh, '<:raw', $path) {
+        local $/;
+        my $html = <$fh>;
+        return \$html if defined $html;
+    }
+    $response->code(404);
+    my $error = 'NatAmbio Alpha dashboard is missing.';
+    return \$error;
 }
 
 sub shutdownPlugin {
@@ -250,6 +264,8 @@ sub playbackTelemetry {
     return unless $telemetry && $telemetry->{slot} == $slot;
     $telemetry->{bufferAhead} = $latest->{frames} > $frames ? ($latest->{frames} - $frames) / $rate : 0;
     $telemetry->{settingsPending} = ($revision{$base} || 0) != $telemetry->{revision} ? 1 : 0;
+    # Cached dashboards from before playhead alignment expect a freshness field.
+    $telemetry->{age} = 0;
     return $telemetry;
 }
 

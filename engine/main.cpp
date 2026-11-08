@@ -466,7 +466,7 @@ private:
 int main(int argc, char** argv)
 {
     if (argc == 2 && std::string(argv[1]) == "--version") {
-        std::cout << "NatAmbio Alpha 0.1.3\n";
+        std::cout << "NatAmbio Alpha 0.1.4\n";
         return 0;
     }
     if (argc < 2) {
