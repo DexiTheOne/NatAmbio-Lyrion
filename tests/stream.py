@@ -71,3 +71,14 @@ with tempfile.TemporaryDirectory() as tmp:
     assert quiet["peak"] < active["peak"] / 3
     assert quiet["left"] < active["left"] / 5
     assert quiet["cpu"] >= 0
+
+    settings.write_text("reset 1\nrevision 17\nazimuth 22\n")
+    render(base, rate, [(0, 0)] * (rate // 2) + loud, "--stream=221")
+    timeline = base.with_suffix(".221.timeline").read_bytes()
+    latest = json.loads(timeline[:512])
+    before = json.loads(timeline[2 * 512:3 * 512])
+    assert latest["frames"] == rate // 2 + len(loud)
+    assert before["slot"] == 1 and before["peak"] == 0
+    assert latest["peak"] > 0
+    assert latest["revision"] == before["revision"] == 17
+    assert latest["azimuth"] == before["azimuth"] == 22

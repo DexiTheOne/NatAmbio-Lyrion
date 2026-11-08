@@ -101,8 +101,11 @@ async function refresh() {
             showValue(input);
         }
         telemetry = result.telemetry || {};
+        const ahead = telemetry.bufferAhead >= .1 ? ` · ${telemetry.bufferAhead.toFixed(1)} s rendered ahead` : "";
         status.textContent = !result.available ? "DSP helper or SoX unavailable" :
-            !settings.enabled ? "Alpha disabled" : "Alpha enabled · takes effect on the next stream";
+            !settings.enabled ? "Alpha disabled" :
+            telemetry.settingsPending ? "Setting change queued for playback" + ahead :
+            telemetry.rate ? "Following player" + ahead : "Alpha enabled · waiting for a processed stream";
         updateReadouts();
     } catch {
         if (player.value === id) status.textContent = "Lyrion connection unavailable";
@@ -112,7 +115,7 @@ async function refresh() {
 }
 
 function updateReadouts() {
-    const current = telemetry.age <= 5;
+    const current = Boolean(telemetry.rate);
     const peakDb = current ? 20 * Math.log10(Math.max(telemetry.peak, .000032)) : -90;
     const display = {
         cpu: current ? (100 * telemetry.cpu).toFixed(1) + "%" : "idle",
@@ -145,7 +148,7 @@ function paint(now) {
     ctx.clearRect(0, 0, width, height);
     const x = width / 2, y = height * .85;
     const radius = Math.min(width * .45, height * .72);
-    const theta = (settings.azimuth || 30) * Math.PI / 180;
+    const theta = (telemetry.azimuth ?? settings.azimuth ?? 30) * Math.PI / 180;
     ctx.strokeStyle = "#d2cabd";
     for (let ring = 1; ring <= 5; ++ring) {
         ctx.beginPath(); ctx.arc(x, y, radius * ring / 5, Math.PI, 2 * Math.PI); ctx.stroke();
@@ -156,7 +159,7 @@ function paint(now) {
         ctx.lineTo(x + radius * Math.sin(a), y - radius * Math.cos(a)); ctx.stroke();
     }
 
-    const current = telemetry.age <= 5;
+    const current = Boolean(telemetry.rate);
     const valid = current && telemetry.valid && telemetry.major > 0;
     const target = {
         angle: valid ? Math.atan2(telemetry.side * Math.sign(telemetry.mid || 1), Math.abs(telemetry.mid)) : 0,
@@ -190,13 +193,13 @@ function paint(now) {
         ctx.fillRect(sx - .18 * radius, sy - .18 * radius, .36 * radius, .36 * radius);
         ctx.strokeStyle = "#a49c90";
         ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(sx, sy); ctx.stroke();
-        const bend = .14 * radius * (settings.alpha || 1.8);
+        const bend = .14 * radius * (telemetry.alpha ?? settings.alpha ?? 1.8);
         const cx = (x + sx) / 2 - sign * bend, cy = (y + sy) / 2;
-        ctx.strokeStyle = `rgba(185,66,39,${.28 + (settings.ild || 14) / 60})`;
+        ctx.strokeStyle = `rgba(185,66,39,${.28 + (telemetry.ild ?? settings.ild ?? 14) / 60})`;
         ctx.beginPath(); ctx.moveTo(x, y); ctx.quadraticCurveTo(cx, cy, sx, sy); ctx.stroke();
         ctx.fillStyle = ctx.strokeStyle;
         for (let dot = 1; dot <= 4; ++dot) {
-            const t = dot / 5 * (1 + ((settings.itd || 260) - 260) / 1600);
+            const t = dot / 5 * (1 + ((telemetry.itd ?? settings.itd ?? 260) - 260) / 1600);
             const q = 1 - t;
             ctx.beginPath();
             ctx.arc(q*q*x + 2*q*t*cx + t*t*sx, q*q*y + 2*q*t*cy + t*t*sy, 2, 0, 2 * Math.PI);

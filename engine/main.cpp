@@ -8,6 +8,7 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <time.h>
@@ -19,6 +20,8 @@
 namespace {
 
 constexpr int blockSize = 256;
+constexpr int timelineSlots = 30 * 180;
+constexpr int timelineRecordBytes = 512;
 using Clock = std::chrono::steady_clock;
 using Stereo = std::array<float, 2>;
 
@@ -202,7 +205,7 @@ private:
 
 class Renderer {
 public:
-    Renderer(int sampleRate, const std::string& base)
+    Renderer(int sampleRate, const std::string& base, const std::string& stream)
         : rate(sampleRate), state(base), processor(rate, blockSize), history(rate)
     {
         config.nae_enabled = config.xtc_enabled = true;
@@ -210,7 +213,11 @@ public:
         settings.reload(state + ".settings");
         config.nae.steps_length = blockSize * static_cast<int>(settings.value("window", 5, 1, 20));
         updateSettings(true);
+        if (!stream.empty())
+            timeline.open(state + "." + stream + ".timeline", std::ios::binary | std::ios::trunc);
         latency = processor.getLatencySamples(config);
+        outputRevision = pendingRevision;
+        outputGeometry = config.xtc;
         dry.assign(latency, {});
         drop = latency;
         epoch = settings.value("epoch", 0, 0, 1e15);
@@ -292,6 +299,11 @@ private:
         }
         trimTarget = std::pow(10.0, settings.value("trim", -3, -12, 6) / 20.0);
         bypassTarget = settings.value("bypass", 0, 0, 1);
+        const int revision = static_cast<int>(settings.value("revision", 0, 0, 2147483647));
+        if (revision != pendingRevision) {
+            pendingRevision = revision;
+            revisionDelay = latency + blockSize;
+        }
         if (initial) {
             trim = trimTarget;
             bypass = bypassTarget;
@@ -339,6 +351,10 @@ private:
             bypass += std::clamp(bypassTarget - bypass, -bypassStep, bypassStep);
             emit(0, wetLeft[i], dryFrame[0]);
             emit(1, wetRight[i], dryFrame[1]);
+            if (outputRevision != pendingRevision && revisionDelay > 0 && --revisionDelay == 0) {
+                outputRevision = pendingRevision;
+                outputGeometry = config.xtc;
+            }
             if (peakHold > 0)
                 --peakHold;
             else
@@ -352,7 +368,7 @@ private:
                 ++overBudget;
             if (framesRendered >= nextReport) {
                 report();
-                nextReport = framesRendered + rate / 30;
+                nextReport = (framesRendered / reportInterval() + 1) * reportInterval();
             }
         }
         queued = 0;
@@ -376,11 +392,19 @@ private:
         writeWord(std::cout, static_cast<std::uint32_t>(quantized), 3);
     }
 
-    void report() const
+    int reportInterval() const { return (rate + 29) / 30; }
+
+    void report()
     {
         const auto pca = processor.getNaePcaAnalysis();
-        std::ofstream file(state + ".telemetry.new", std::ios::trunc);
-        file << "{\"rate\":" << rate << ",\"frames\":" << framesRendered
+        std::ostringstream json;
+        const auto slot = framesRendered / reportInterval();
+        json << "{\"rate\":" << rate << ",\"frames\":" << framesRendered
+             << ",\"slot\":" << slot << ",\"revision\":" << outputRevision
+             << ",\"azimuth\":" << outputGeometry.azimuth_deg
+             << ",\"itd\":" << outputGeometry.itd_us
+             << ",\"ild\":" << outputGeometry.ild_db
+             << ",\"alpha\":" << outputGeometry.ild_alpha
              << ",\"block\":" << blockSize << ",\"cpu\":" << cpu
              << ",\"xrun\":" << overBudget << ",\"peak\":" << peak
              << ",\"clipped\":" << (clipped ? "true" : "false")
@@ -388,7 +412,24 @@ private:
              << ",\"valid\":" << (pca.valid ? "true" : "false")
              << ",\"mid\":" << pca.principalMid << ",\"side\":" << pca.principalSide
              << ",\"major\":" << pca.eigenvaluePrimary << ",\"minor\":" << pca.eigenvalueSecondary
-             << ",\"window\":" << pca.windowSamples << "}\n";
+             << ",\"window\":" << pca.windowSamples << "}";
+        const auto data = json.str();
+        if (timeline && data.size() < timelineRecordBytes) {
+            auto record = data;
+            record.resize(timelineRecordBytes - 1, ' ');
+            record.push_back('\n');
+            if (slot != previousSlot) {
+                timeline.seekp((1 + slot % timelineSlots) * timelineRecordBytes);
+                timeline.write(record.data(), record.size());
+                previousSlot = slot;
+            }
+            timeline.seekp(0);
+            timeline.write(record.data(), record.size());
+            timeline.flush();
+            return;
+        }
+        std::ofstream file(state + ".telemetry.new", std::ios::trunc);
+        file << data << '\n';
         file.close();
         if (file)
             std::rename((state + ".telemetry.new").c_str(), (state + ".telemetry").c_str());
@@ -396,10 +437,12 @@ private:
 
     int rate;
     std::string state;
+    std::ofstream timeline;
     NatAmbioCoreProcessor processor;
     History history;
     Settings settings;
     NatAmbioStereoConfig config;
+    XtcStereoConfig outputGeometry;
     double epoch = 0;
     int latency = 0;
     int drop = 0;
@@ -413,6 +456,8 @@ private:
     double peakRelease = 0, rmsAttack = 0, rmsRelease = 0;
     int peakHold = 0;
     bool clipped = false;
+    std::uint64_t previousSlot = std::numeric_limits<std::uint64_t>::max();
+    int outputRevision = 0, pendingRevision = 0, revisionDelay = 0;
     std::uint64_t framesRendered = 0, nextReport = 0, nextSettingsRead = 0, overBudget = 0;
 };
 
@@ -421,7 +466,7 @@ private:
 int main(int argc, char** argv)
 {
     if (argc == 2 && std::string(argv[1]) == "--version") {
-        std::cout << "NatAmbio Alpha 0.1.2\n";
+        std::cout << "NatAmbio Alpha 0.1.3\n";
         return 0;
     }
     if (argc < 2) {
@@ -434,8 +479,21 @@ int main(int argc, char** argv)
     try {
         const Au au = readHeader(std::cin);
         TrackLock lock(std::string(argv[1]) + ".lock");
-        Renderer renderer(au.rate, argv[1]);
-        renderer.run(au, argc > 2);
+        std::string stream;
+        bool discontinuity = false;
+        for (int i = 2; i < argc; ++i) {
+            const std::string argument = argv[i];
+            if (argument.compare(0, 9, "--stream=") == 0) {
+                stream = argument.substr(9);
+                if (stream.empty() || stream.size() > 18
+                    || stream.find_first_not_of("0123456789") != std::string::npos)
+                    throw std::runtime_error("invalid stream identifier");
+            } else {
+                discontinuity = true;
+            }
+        }
+        Renderer renderer(au.rate, argv[1], stream);
+        renderer.run(au, discontinuity);
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "NatAmbio Alpha: " << error.what() << '\n';

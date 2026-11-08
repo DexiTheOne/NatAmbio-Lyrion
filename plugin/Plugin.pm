@@ -8,9 +8,10 @@ use File::Path qw(make_path);
 use File::Spec::Functions qw(catdir catfile);
 use File::Temp qw(tempfile);
 use JSON::XS qw(decode_json);
-use Time::HiRes qw(stat time);
+use Time::HiRes qw(time);
 use Slim::Control::Request;
 use Slim::Player::Client;
+use Slim::Player::Song;
 use Slim::Player::TranscodingHelper;
 use Slim::Utils::Misc;
 use Slim::Utils::OSDetect;
@@ -22,6 +23,13 @@ my $page = 'plugins/NatAmbioAlpha/index.html';
 my ($root, $helper, $ready, $active);
 my %rules;
 my %epoch;
+my %revision;
+my %streams;
+my ($originalSongOpen, $songOpenHook);
+my $streamSequence = int(time() * 1000);
+my %liveAudioControl = map { $_ => 1 } qw(
+    bypass nae_bypass xtc_bypass front ambience preamp trim azimuth itd ild alpha slope algorithm
+);
 my %controls = (
     enabled => [0, 0, 1], reset => [0, 0, 1], bypass => [0, 0, 1],
     nae_bypass => [0, 0, 1], xtc_bypass => [0, 0, 1],
@@ -40,6 +48,12 @@ sub initPlugin {
     $active = 1;
     $root = catdir(Slim::Utils::OSDetect::dirsFor('cache'), 'NatAmbioAlpha');
     make_path($root, { mode => 0700 }) unless -d $root;
+    if (opendir my $dir, $root) {
+        for my $file (readdir $dir) {
+            unlink catfile($root, $file) if $file =~ /\A[\da-f-]{17}\.\d{1,18}\.timeline\z/;
+        }
+        closedir $dir;
+    }
     $helper = catfile(dirname(__FILE__), 'Bin', 'natambio-alpha');
     # LMS's ZIP installer can remove the executable mode.
     chmod 0755, $helper if -f $helper && !-x $helper;
@@ -54,6 +68,7 @@ sub initPlugin {
     Slim::Control::Request::subscribe(\&playbackStopped, [['playlist'], ['stop']]);
     Slim::Control::Request::addDispatch(['natambioalpha', 'state', '?'], [1, 1, 0, \&getState]);
     Slim::Control::Request::addDispatch(['natambioalpha', 'set', '_key', '_value'], [1, 0, 0, \&setControl]);
+    installSongHook() if $ready;
     Slim::Web::Pages->addPageLinks('plugins', { PLUGIN_NATAMBIO_ALPHA => $page });
     Slim::Web::Pages->addPageFunction(qr{^plugins/NatAmbioAlpha/index\.html$}, sub {
         return Slim::Web::HTTP::filltemplatefile($page, $_[1]);
@@ -66,6 +81,10 @@ sub initPlugin {
 
 sub shutdownPlugin {
     $active = 0;
+    if ($songOpenHook && Slim::Player::Song->can('open') == $songOpenHook) {
+        no warnings 'redefine';
+        *Slim::Player::Song::open = $originalSongOpen;
+    }
     Slim::Control::Request::unsubscribe(\&clientConnected);
     Slim::Control::Request::unsubscribe(\&playbackStopped);
     Slim::Web::Pages->addPageLinks('plugins', { PLUGIN_NATAMBIO_ALPHA => undef });
@@ -81,6 +100,7 @@ sub playbackStopped {
     return unless -d $root && $ready && settings($client)->{enabled};
     ++$epoch{$base};
     unlink "$base.history", "$base.telemetry";
+    unlink "$base.$_.timeline" for @{delete($streams{$base}) || []};
     writeSettings($client, $base);
 }
 
@@ -108,6 +128,7 @@ sub writeSettings {
     my $settings = settings($client);
     my ($fh, $tmp) = tempfile('settings-XXXXXX', DIR => $root, UNLINK => 0);
     print {$fh} "epoch ", ($epoch{$base} //= int(time() * 1000)), "\n";
+    print {$fh} "revision ", ($revision{$base} || 0), "\n";
     for my $key (sort keys %$settings) {
         print {$fh} "$key $settings->{$key}\n";
     }
@@ -151,7 +172,7 @@ sub configurePlayer {
         my $key = "$source-flc-*-$id";
         my $command = '[sox] -q $FILE$ -t au -b 24 - $START$ $RESAMPLE$ | '
             . shellQuote($helper) . ' ' . shellQuote($base)
-            . ' $START$ | [sox] -q -t au - -t flac -C 0 -';
+            . ' $START$ --stream=0 | [sox] -q -t au - -t flac -C 0 -';
         my $old = $Slim::Player::TranscodingHelper::commandTable{$key};
         my $oldCaps = $Slim::Player::TranscodingHelper::capabilities{$key};
         $rules{$id}{$key} = [$command, $old, $oldCaps];
@@ -163,6 +184,75 @@ sub configurePlayer {
     }
 }
 
+sub installSongHook {
+    $originalSongOpen = Slim::Player::Song->can('open');
+    my $open = $originalSongOpen;
+    $songOpenHook = sub {
+        my $song = $_[0];
+        my $client = $active && $song->master;
+        my $rules = $client && $rules{lc($client->id)};
+        return $open->(@_) unless $rules;
+
+        # Lyrion creates a separate conversion command per song open, including
+        # seeks and gapless prefetch. Scope our stream identifier to that call.
+        my $stream = ++$streamSequence;
+        local %Slim::Player::TranscodingHelper::commandTable =
+            %Slim::Player::TranscodingHelper::commandTable;
+        for my $key (keys %$rules) {
+            my $command = \$Slim::Player::TranscodingHelper::commandTable{$key};
+            next unless $$command && $$command eq $rules->{$key}[0];
+            $$command =~ s/--stream=0/--stream=$stream/;
+        }
+        my @result = $open->(@_);
+        if ($result[0]) {
+            $song->pluginData('natambioalpha.stream', $stream);
+            my $base = statePath($client);
+            my $entries = $streams{$base} ||= [];
+            push @$entries, $stream;
+            while (@$entries > 4) {
+                my $expired = shift @$entries;
+                unlink "$base.$expired.timeline";
+            }
+        }
+        return wantarray ? @result : $result[-1];
+    };
+    no warnings 'redefine';
+    *Slim::Player::Song::open = $songOpenHook;
+}
+
+sub timelineRecord {
+    my ($fh, $index) = @_;
+    return unless seek($fh, $index * 512, 0);
+    return unless read($fh, my $raw, 512) == 512;
+    my $record = eval { decode_json($raw) };
+    return ref $record eq 'HASH' ? $record : undef;
+}
+
+sub playbackTelemetry {
+    my ($client, $base) = @_;
+    my $controller = $client->controller or return;
+    return unless $controller->isPlaying(1) || $controller->isPaused;
+    my $song = $controller->playingSong or return;
+    my $stream = $song->pluginData('natambioalpha.stream') or return;
+    return unless open my $fh, '<:raw', "$base.$stream.timeline";
+    my $latest = timelineRecord($fh, 0) or return;
+    my $rate = $latest->{rate} or return;
+    my $elapsed = ($controller->playingSongElapsed || 0) - ($song->startOffset || 0);
+    my $frames = int(($elapsed > 0 ? $elapsed : 0) * $rate);
+    my $interval = int(($rate + 29) / 30);
+    my $slot = int($frames / $interval);
+    $slot = $latest->{slot} if $slot > $latest->{slot};
+    my $telemetry = timelineRecord($fh, 1 + ($slot % 5400));
+    if ($telemetry && $telemetry->{frames} > $frames && $slot > 0) {
+        --$slot;
+        $telemetry = timelineRecord($fh, 1 + ($slot % 5400));
+    }
+    return unless $telemetry && $telemetry->{slot} == $slot;
+    $telemetry->{bufferAhead} = $latest->{frames} > $frames ? ($latest->{frames} - $frames) / $rate : 0;
+    $telemetry->{settingsPending} = ($revision{$base} || 0) != $telemetry->{revision} ? 1 : 0;
+    return $telemetry;
+}
+
 sub getState {
     my $request = shift;
     my $client = $request->client;
@@ -170,16 +260,8 @@ sub getState {
     unless ($base) { $request->setStatusBadParams(); return; }
     $request->addResult('settings', settings($client));
     $request->addResult('available', $ready);
-    if (open my $fh, '<', "$base.telemetry") {
-        my $raw = <$fh>;
-        my $modified = (stat $fh)[9];
-        close $fh;
-        my $telemetry = eval { decode_json($raw // '') };
-        if (ref $telemetry eq 'HASH') {
-            $telemetry->{age} = $modified ? time() - $modified : 0;
-            $request->addResult('telemetry', $telemetry);
-        }
-    }
+    my $telemetry = playbackTelemetry($client, $base);
+    $request->addResult('telemetry', $telemetry) if $telemetry;
     $request->setStatusDone();
 }
 
@@ -196,6 +278,7 @@ sub setControl {
         return;
     }
     my $cp = $prefs->client($client);
+    ++$revision{$base} if $liveAudioControl{$key};
     $cp->set($key, $value + 0);
     if ($key eq 'enabled' || $key eq 'reset') {
         ++$epoch{$base};
