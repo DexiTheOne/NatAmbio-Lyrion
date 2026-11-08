@@ -10,6 +10,7 @@
 #include <map>
 #include <stdexcept>
 #include <string>
+#include <time.h>
 #include <vector>
 #include <sys/file.h>
 #include <sys/stat.h>
@@ -20,6 +21,13 @@ namespace {
 constexpr int blockSize = 256;
 using Clock = std::chrono::steady_clock;
 using Stereo = std::array<float, 2>;
+
+double threadCpuSeconds()
+{
+    timespec time{};
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &time);
+    return time.tv_sec + time.tv_nsec * 1e-9;
+}
 
 std::uint32_t readWord(std::istream& stream, int bytes = 4)
 {
@@ -206,6 +214,9 @@ public:
         dry.assign(latency, {});
         drop = latency;
         epoch = settings.value("epoch", 0, 0, 1e15);
+        peakRelease = std::pow(10.0, -24.0 / (20.0 * rate));
+        rmsAttack = 1 - std::exp(-1.0 / (0.010 * rate));
+        rmsRelease = 1 - std::exp(-1.0 / (0.090 * rate));
     }
 
     void run(const Au& au, bool discontinuity)
@@ -300,11 +311,18 @@ private:
         if (queued == 0)
             return;
         const auto started = Clock::now();
-        if (output && framesRendered >= nextReport) {
+        if (output && framesRendered >= nextSettingsRead) {
             settings.reload(state + ".settings");
             updateSettings(false);
+            nextSettingsRead = framesRendered + rate / 15;
         }
+        const double dspStarted = output ? threadCpuSeconds() : 0;
         processor.process(left.data(), right.data(), wetLeft.data(), wetRight.data(), queued, config);
+        if (output) {
+            const double blockSeconds = static_cast<double>(queued) / rate;
+            const double load = (threadCpuSeconds() - dspStarted) / blockSeconds;
+            cpu += (load - cpu) * -std::expm1(-blockSeconds);
+        }
         const double trimCoeff = 1 - std::exp(-1.0 / (0.015 * rate));
         const double bypassStep = 1.0 / (0.015 * rate);
         for (int i = 0; i < queued; ++i) {
@@ -321,17 +339,20 @@ private:
             bypass += std::clamp(bypassTarget - bypass, -bypassStep, bypassStep);
             emit(0, wetLeft[i], dryFrame[0]);
             emit(1, wetRight[i], dryFrame[1]);
+            if (peakHold > 0)
+                --peakHold;
+            else
+                peak *= peakRelease;
             ++framesRendered;
         }
         if (output) {
             const double load = std::chrono::duration<double>(Clock::now() - started).count()
                 * rate / queued;
-            cpu += (load - cpu) * 0.05;
             if (load > 1)
                 ++overBudget;
             if (framesRendered >= nextReport) {
                 report();
-                nextReport = framesRendered + rate / 15;
+                nextReport = framesRendered + rate / 30;
             }
         }
         queued = 0;
@@ -341,8 +362,15 @@ private:
     {
         const double processed = std::isfinite(wet) ? wet * trim : 0;
         const double out = processed * (1 - bypass) + drySample * bypass;
-        peak = std::max(peak, std::abs(processed));
-        energy[channel] += (out * out - energy[channel]) / (0.035 * rate);
+        const double magnitude = std::abs(processed);
+        if (magnitude >= peak) {
+            peak = magnitude;
+            peakHold = rate / 12;
+        }
+        clipped = clipped || magnitude >= 1.0;
+        const double squared = out * out;
+        energy[channel] += (squared - energy[channel])
+            * (squared > energy[channel] ? rmsAttack : rmsRelease);
         const auto quantized = static_cast<std::int32_t>(
             std::llround(std::clamp(out, -1.0, 8388607.0 / 8388608) * 8388608));
         writeWord(std::cout, static_cast<std::uint32_t>(quantized), 3);
@@ -355,6 +383,7 @@ private:
         file << "{\"rate\":" << rate << ",\"frames\":" << framesRendered
              << ",\"block\":" << blockSize << ",\"cpu\":" << cpu
              << ",\"xrun\":" << overBudget << ",\"peak\":" << peak
+             << ",\"clipped\":" << (clipped ? "true" : "false")
              << ",\"left\":" << std::sqrt(energy[0]) << ",\"right\":" << std::sqrt(energy[1])
              << ",\"valid\":" << (pca.valid ? "true" : "false")
              << ",\"mid\":" << pca.principalMid << ",\"side\":" << pca.principalSide
@@ -381,7 +410,10 @@ private:
     std::array<double, 2> energy{};
     double trim = 1, trimTarget = 1, bypass = 0, bypassTarget = 0;
     double cpu = 0, peak = 0;
-    std::uint64_t framesRendered = 0, nextReport = 0, overBudget = 0;
+    double peakRelease = 0, rmsAttack = 0, rmsRelease = 0;
+    int peakHold = 0;
+    bool clipped = false;
+    std::uint64_t framesRendered = 0, nextReport = 0, nextSettingsRead = 0, overBudget = 0;
 };
 
 } // namespace
@@ -389,7 +421,7 @@ private:
 int main(int argc, char** argv)
 {
     if (argc == 2 && std::string(argv[1]) == "--version") {
-        std::cout << "NatAmbio Alpha 0.1.1\n";
+        std::cout << "NatAmbio Alpha 0.1.2\n";
         return 0;
     }
     if (argc < 2) {

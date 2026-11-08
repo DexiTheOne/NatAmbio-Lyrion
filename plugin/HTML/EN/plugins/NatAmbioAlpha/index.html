@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NatAmbio Alpha</title>
-<link rel="stylesheet" href="radar.css">
-<script src="radar.js" defer></script>
+<link rel="stylesheet" href="radar.css?v=0.1.2">
+<script src="radar.js?v=0.1.2" defer></script>
 </head>
 <body>
 <main id="instrument" aria-label="NatAmbio Alpha">
@@ -15,12 +15,12 @@
       <div data-control="trim"></div>
       <label class="switch">BYPASS <input type="checkbox" data-setting="bypass"></label>
       <div id="readouts">
-        <span>CPU <output id="cpu">idle</output></span>
+        <span title="DSP thread CPU time as a share of the audio block budget">CPU <output id="cpu">idle</output></span>
         <span>SR <output id="rate">—</output></span>
         <span>BLOCK <output id="block">—</output></span>
         <span>XRUN <output id="xrun">0</output></span>
-        <span>OVR <output id="peak">—</output></span>
-        <meter id="level" min="0" max="1" value="0" aria-label="Output level"></meter>
+        <span id="peak-label" title="Processed peak before master bypass. Red indicates a clip this track.">PEAK <output id="peak">—</output></span>
+        <meter id="level" min="0" max="1" value="0" aria-label="Processed peak level"></meter>
       </div>
     </div>
   </header>

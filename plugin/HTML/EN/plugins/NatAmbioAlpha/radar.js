@@ -113,15 +113,17 @@ async function refresh() {
 
 function updateReadouts() {
     const current = telemetry.age <= 5;
+    const peakDb = current ? 20 * Math.log10(Math.max(telemetry.peak, .000032)) : -90;
     const display = {
         cpu: current ? (100 * telemetry.cpu).toFixed(1) + "%" : "idle",
         rate: current ? (telemetry.rate / 1000).toFixed(1) + " kHz" : "—",
         block: current ? telemetry.block + " smp" : "—",
         xrun: current ? telemetry.xrun : 0,
-        peak: current ? (20 * Math.log10(Math.max(telemetry.peak, .000032))).toFixed(1) + " dB" : "—",
-        level: current ? Math.min(1, Math.max(telemetry.left, telemetry.right)) : 0,
+        peak: current ? peakDb.toFixed(1) + " dB" : "—",
+        level: Math.max(0, Math.min(1, (peakDb + 60) / 60)),
     };
     for (const [key, value] of Object.entries(display)) document.getElementById(key).value = value;
+    document.getElementById("peak-label").classList.toggle("clipped", current && Boolean(telemetry.clipped));
 }
 
 let cloud = {angle: 0, spread: 1, opacity: 0, left: 0, right: 0};
@@ -162,7 +164,11 @@ function paint(now) {
         opacity: Number(valid), left: current ? telemetry.left : 0, right: current ? telemetry.right : 0,
     };
     const decay = settings.response ? 1 - Math.exp(-dt / settings.response) : 1;
-    for (const key of Object.keys(cloud)) cloud[key] += (target[key] - cloud[key]) * decay;
+    for (const key of ["angle", "spread", "opacity"]) cloud[key] += (target[key] - cloud[key]) * decay;
+    for (const key of ["left", "right"]) {
+        const time = target[key] > cloud[key] ? 16 : 95;
+        cloud[key] += (target[key] - cloud[key]) * (1 - Math.exp(-dt / time));
+    }
     if (cloud.opacity > .01) {
         ctx.save();
         ctx.translate(x, y); ctx.rotate(cloud.angle);
@@ -178,7 +184,7 @@ function paint(now) {
         const sx = x + sign * radius * Math.sin(theta), sy = y - radius * Math.cos(theta);
         const rms = sign < 0 ? cloud.left : cloud.right;
         const glow = ctx.createRadialGradient(sx, sy, 0, sx, sy, .18 * radius);
-        glow.addColorStop(0, `rgba(196,75,44,${Math.min(.6, rms * 2.8)})`);
+        glow.addColorStop(0, `rgba(196,75,44,${Math.min(.7, Math.sqrt(rms) * 1.4)})`);
         glow.addColorStop(1, "rgba(196,75,44,0)");
         ctx.fillStyle = glow;
         ctx.fillRect(sx - .18 * radius, sy - .18 * radius, .36 * radius, .36 * radius);
@@ -235,5 +241,9 @@ player.addEventListener("change", () => {
         status.textContent = "Could not load Lyrion players.";
     }
 })();
-setInterval(refresh, 200);
+async function poll() {
+    await refresh();
+    setTimeout(poll, document.querySelector("#technical").hidden ? 250 : 50);
+}
+setTimeout(poll, 50);
 requestAnimationFrame(paint);

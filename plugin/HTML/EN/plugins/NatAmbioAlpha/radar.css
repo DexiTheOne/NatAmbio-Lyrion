@@ -13,6 +13,7 @@ header { min-height: 82px; display: flex; align-items: center; gap: 30px; paddin
 .technical [data-control] { width: 155px }
 #readouts { display: grid; grid-template-columns: repeat(4, auto); gap: 10px; font: 12px Recursive, monospace }
 #level { grid-column: span 3; width: 100%; height: 12px; accent-color: var(--red) }
+#peak-label.clipped { color: #ff876b }
 .workspace { display: grid; gap: 8px }
 .expanded .workspace { grid-template-columns: minmax(360px, 1.1fr) minmax(310px, 1fr) }
 .panel { color-scheme: light; background: var(--cream); color: var(--ink); border: 1px solid #c2baac; border-radius: 12px; padding: 18px 23px; box-shadow: 0 5px 0 #100f0e }

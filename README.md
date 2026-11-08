@@ -19,6 +19,8 @@ The chevron opens the PCA field and technical readouts. Under **DSP options**, N
 
 **Reset DSP history on new track** starts each track with a cold DSP state. With the toggle off, the helper replays up to one second of the previous same-rate track into the new engine before emitting audio. The replay preserves block alignment and warms covariance and convolution history. Each track is independently latency-compensated and drained, so exact gapless parity with a single continuous VST render is outside this initial implementation. A seek, stop, or change of sample rate starts fresh.
 
+CPU is the DSP thread's compute time as a share of the audio block budget, averaged over about one second. XRUN counts helper blocks whose elapsed time exceeded their budget. The peak readout follows the processed signal and turns red if the track clips. RESPONSE adjusts the PCA field while the speaker halos follow their own faster level envelope.
+
 Telemetry reflects the server's render position. Player buffering can put the browser meters ahead of audible playback.
 
 ## Build and package
@@ -27,7 +29,7 @@ Telemetry reflects the server's render position. Player buffering can put the br
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
-python3 tools/package.py build/natambio-alpha https://example.org/releases/download/v0.1.1
+python3 tools/package.py build/natambio-alpha https://example.org/releases/download/v0.1.2
 ```
 
 The package script writes a versioned ZIP and Lyrion repository XML with its SHA-1 checksum. Tagging a commit with the version in `plugin/install.xml` builds and publishes both release assets on GitHub.

@@ -60,3 +60,14 @@ with tempfile.TemporaryDirectory() as tmp:
     assert render(base, rate, signal, "trim", "3") == clean
     settings.write_text("reset 0\nepoch 2\n")
     assert render(base, rate, signal) == clean
+
+    settings.write_text("reset 1\nnae_bypass 1\nxtc_bypass 1\ntrim 6\n")
+    loud = [(left * 2, right * 2) for left, right in wave(rate, rate // 5)]
+    render(base, rate, loud)
+    active = json.loads(base.with_suffix(".telemetry").read_text())
+    render(base, rate, loud + [(0, 0)] * (rate // 2))
+    quiet = json.loads(base.with_suffix(".telemetry").read_text())
+    assert active["clipped"] and quiet["clipped"]
+    assert quiet["peak"] < active["peak"] / 3
+    assert quiet["left"] < active["left"] / 5
+    assert quiet["cpu"] >= 0

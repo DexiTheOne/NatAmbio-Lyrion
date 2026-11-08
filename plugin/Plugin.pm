@@ -8,6 +8,7 @@ use File::Path qw(make_path);
 use File::Spec::Functions qw(catdir catfile);
 use File::Temp qw(tempfile);
 use JSON::XS qw(decode_json);
+use Time::HiRes qw(stat time);
 use Slim::Control::Request;
 use Slim::Player::Client;
 use Slim::Player::TranscodingHelper;
@@ -28,7 +29,7 @@ my %controls = (
     window => [5, 1, 20], trim => [-3, -12, 6],
     azimuth => [30, 10, 30], itd => [260, 80, 300], ild => [14, 3, 20],
     alpha => [1.8, 1, 2.5], slope => [200, 60, 500], algorithm => [1, 0, 1],
-    response => [300, 0, 600],
+    response => [150, 0, 600],
 );
 
 sub getDisplayName { 'PLUGIN_NATAMBIO_ALPHA' }
@@ -171,10 +172,10 @@ sub getState {
     $request->addResult('available', $ready);
     if (open my $fh, '<', "$base.telemetry") {
         my $raw = <$fh>;
+        my $modified = (stat $fh)[9];
         close $fh;
         my $telemetry = eval { decode_json($raw // '') };
         if (ref $telemetry eq 'HASH') {
-            my $modified = (stat "$base.telemetry")[9];
             $telemetry->{age} = $modified ? time() - $modified : 0;
             $request->addResult('telemetry', $telemetry);
         }
