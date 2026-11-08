@@ -4,7 +4,10 @@ Server-side stereo NAE and XTC processing for Lyrion Music Server 9 on Linux x86
 
 ## Install
 
-1. Open **Settings → Manage Plugins** and add the repository URL from the latest release under **Additional Repositories**.
+1. Open **Settings → Manage Plugins** and paste this URL into **Additional Repositories**.
+
+   `https://github.com/DexiTheOne/NatAmbio-Lyrion/releases/latest/download/repo.xml`
+
 2. Enable **NatAmbio Alpha**, apply, and restart Lyrion when prompted.
 3. Open **NatAmbio Alpha** from the Lyrion web interface's plugins section. Select a player and turn on **Enable Alpha**. Start a new track to use the new conversion path.
 
