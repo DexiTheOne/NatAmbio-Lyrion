@@ -1,0 +1,34 @@
+# NatAmbio Alpha for Lyrion
+
+Server-side stereo NAE and XTC processing for Lyrion Music Server 9 on Linux x86-64. The browser page recreates NatAmbio's Radar2 editor. Audio plays on the selected Lyrion player.
+
+## Install
+
+1. Open **Settings → Manage Plugins** and add the repository URL from the latest release under **Additional Repositories**.
+2. Enable **NatAmbio Alpha**, apply, and restart Lyrion when prompted.
+3. Open **NatAmbio Alpha** from the Lyrion web interface's plugins section. Select a player and turn on **Enable Alpha**. Start a new track to use the new conversion path.
+
+The player needs to accept lossless FLAC, and the server needs Lyrion's bundled SoX or a compatible SoX on its path. Local FLAC, WAV, AIFF, MP3, and Ogg Vorbis can use the DSP route. Actual decoding support follows the server's SoX build. Keep the target player independent of sync groups for the initial release. For a source that still plays natively, check Lyrion's File Types settings and the player's supported formats. The expanded panel shows whether the helper is rendering.
+
+## Controls
+
+The chevron opens the PCA field and technical readouts. Under **DSP options**, NAE Bypass, XTC Bypass, and NAE Preamp work independently. Output Trim acts on the processed path and the master Bypass crossfades to delay-aligned dry audio. Window Blocks applies at the next stream because it changes latency.
+
+**Reset DSP history on new track** starts each track with a cold DSP state. With the toggle off, the helper replays up to one second of the previous same-rate track into the new engine before emitting audio. The replay preserves block alignment and warms covariance and convolution history. Each track is independently latency-compensated and drained, so exact gapless parity with a single continuous VST render is outside this initial implementation. A seek, stop, or change of sample rate starts fresh.
+
+Telemetry reflects the server's render position. Player buffering can put the browser meters ahead of audible playback.
+
+## Build and package
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+python3 tools/package.py build/natambio-alpha https://example.org/releases/download/v0.1.0
+```
+
+The package script writes a versioned ZIP and Lyrion repository XML with its SHA-1 checksum. Tagging a commit with the version in `plugin/install.xml` builds and publishes both release assets on GitHub.
+
+## Provenance
+
+The JUCE-free core comes from the [NatAmbio VST3 project](https://github.com/digitalfrost84/NatAmbio-VST3), based on commit `9c01017` with the local DSP changes present when this port started. NatAmbio's NAE and XTC algorithms originate in [Raul Fernández Ortega's NatAmbio](https://github.com/raul-fernandez-ortega/natambio), pinned in the VST project at `6723da8807807aacc71b5d60610dc4f6b808a120`. See [LICENSE](LICENSE) and the font licenses shipped with the web page.

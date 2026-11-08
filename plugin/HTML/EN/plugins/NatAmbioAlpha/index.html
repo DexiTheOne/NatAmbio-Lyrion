@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NatAmbio Alpha</title>
+<link rel="stylesheet" href="radar.css">
+<script src="radar.js" defer></script>
+</head>
+<body>
+<main id="instrument" aria-label="NatAmbio Alpha">
+  <header>
+    <div class="wordmark"><h1>NatAmbio</h1><span>NATURAL AMBIENCE</span></div>
+    <div id="technical" class="technical" hidden>
+      <div data-control="trim"></div>
+      <label class="switch">BYPASS <input type="checkbox" data-setting="bypass"></label>
+      <div id="readouts">
+        <span>CPU <output id="cpu">idle</output></span>
+        <span>SR <output id="rate">—</output></span>
+        <span>BLOCK <output id="block">—</output></span>
+        <span>XRUN <output id="xrun">0</output></span>
+        <span>OVR <output id="peak">—</output></span>
+        <meter id="level" min="0" max="1" value="0" aria-label="Output level"></meter>
+      </div>
+    </div>
+  </header>
+  <div class="workspace">
+    <div class="panel controls">
+      <section class="nae">
+        <h2>NAE</h2>
+        <div class="faders"><div data-control="front"></div><div data-control="ambience"></div></div>
+        <div data-control="window"></div>
+      </section>
+      <section class="xtc">
+        <h2>XTC</h2>
+        <div class="sliders">
+          <div data-control="ild"></div><div data-control="azimuth"></div>
+          <div data-control="itd"></div><div data-control="alpha"></div>
+          <div data-control="slope"></div>
+        </div>
+      </section>
+      <button id="expand" aria-expanded="false" aria-controls="field technical" aria-label="Show technical view">›</button>
+    </div>
+    <section id="field" class="panel field" hidden>
+      <h2>NAE PCA FIELD</h2>
+      <canvas id="radar" aria-label="Live principal direction and loudspeaker field"></canvas>
+      <div class="response" data-control="response"></div>
+      <details>
+        <summary>DSP options</summary>
+        <div data-control="preamp"></div>
+        <label class="switch"><input type="checkbox" data-setting="reset"> Reset DSP history on new track</label>
+        <label class="switch"><input type="checkbox" data-setting="nae_bypass"> NAE bypass</label>
+        <label class="switch"><input type="checkbox" data-setting="xtc_bypass"> XTC bypass</label>
+        <label class="switch"><input type="checkbox" data-setting="algorithm"> Corrected XTC</label>
+      </details>
+    </section>
+  </div>
+  <footer>
+    <label>Player <select id="player" aria-label="Lyrion player"></select></label>
+    <label class="switch"><input type="checkbox" data-setting="enabled"> Enable Alpha</label>
+    <span id="status" role="status">Connecting to Lyrion…</span>
+  </footer>
+</main>
+</body>
+</html>

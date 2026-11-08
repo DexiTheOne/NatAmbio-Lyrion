@@ -1,0 +1,5 @@
+PLUGIN_NATAMBIO_ALPHA
+	EN	NatAmbio Alpha
+
+PLUGIN_NATAMBIO_ALPHA_DESC
+	EN	Natural ambience extraction and crosstalk cancellation for stereo playback
