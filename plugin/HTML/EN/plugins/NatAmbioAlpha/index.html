@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NatAmbio Alpha</title>
-<link rel="stylesheet" href="radar.css?v=0.1.11">
-<script src="radar.js?v=0.1.11" defer></script>
+<link rel="stylesheet" href="radar.css?v=0.1.12">
+<script src="radar.js?v=0.1.12" defer></script>
 </head>
 <body>
 <main id="instrument" aria-label="NatAmbio Alpha">
@@ -16,21 +16,30 @@
         <label class="switch"><input class="toggle" type="checkbox" role="switch" data-setting="enabled"><span>Enable<br>Routing</span></label>
         <label class="switch"><input class="toggle" type="checkbox" role="switch" data-setting="bypass"><span>Bypass<br>All</span></label>
       </div>
-      <div class="player-session header-box">
-        <label>Player <select id="player" aria-label="Lyrion player"></select></label>
-        <div class="player-messages">
-          <span id="status" role="status">Connecting to Lyrion…</span>
-          <span id="render-ahead"></span>
-        </div>
+      <div class="player-selector header-box">
+        <label class="panel-caption" for="player">Lyrion Player</label>
+        <div class="player-switch"><select id="player"></select></div>
       </div>
       <div class="trim-knob header-box" data-control="trim"></div>
+      <div class="player-session header-box">
+        <div id="status" role="status">Connecting to Lyrion…</div>
+        <div class="buffer-gauge">
+          <label class="panel-caption" for="buffer-fill">Buffer Fill</label>
+          <span id="buffer-value" aria-hidden="true">0.0 s / 120 s</span>
+          <div class="meter-track buffer-track">
+            <meter id="buffer-fill" min="0" max="120" low="3" high="10" optimum="120" value="0" aria-valuetext="0.0 seconds"></meter>
+          </div>
+        </div>
+      </div>
       <div id="readouts" class="header-box">
         <span title="DSP thread CPU time as a share of the audio block budget">CPU <output id="cpu">idle</output></span>
         <span>SR <output id="rate">—</output></span>
         <span>BLOCK <output id="block">—</output></span>
         <span>XRUN <output id="xrun">0</output></span>
         <span id="peak-label" title="Processed peak before master bypass. Red indicates a clip this track.">PEAK <output id="peak">—</output></span>
-        <meter id="level" min="0" max="1" value="0" aria-label="Processed peak level"></meter>
+        <div class="meter-track peak-track">
+          <meter id="level" min="0" max="1" low=".9" high=".9833333333" optimum="0" value="0" aria-label="Processed peak level"></meter>
+        </div>
       </div>
     </div>
   </header>
@@ -39,23 +48,25 @@
       <section class="nae">
         <div class="section-heading">
           <h2>NAE</h2>
-          <label class="switch">Bypass <input class="toggle" type="checkbox" role="switch" aria-label="NAE bypass" data-setting="nae_bypass"></label>
+          <label class="switch"><span>Bypass</span><input class="toggle" type="checkbox" role="switch" aria-label="NAE bypass" data-setting="nae_bypass"></label>
         </div>
         <div class="faders"><div data-control="front"></div><div data-control="ambience"></div></div>
         <div class="sliders">
           <div data-control="preamp"></div>
           <div data-control="window"></div>
+          <label class="switch"><span>RESET DSP HISTORY ON NEW TRACK</span><input class="toggle" type="checkbox" role="switch" data-setting="reset"></label>
         </div>
       </section>
       <section class="xtc">
         <div class="section-heading">
           <h2>XTC</h2>
-          <label class="switch">Bypass <input class="toggle" type="checkbox" role="switch" aria-label="XTC bypass" data-setting="xtc_bypass"></label>
+          <label class="switch"><span>Bypass</span><input class="toggle" type="checkbox" role="switch" aria-label="XTC bypass" data-setting="xtc_bypass"></label>
         </div>
         <div class="sliders">
           <div data-control="ild"></div><div data-control="azimuth"></div>
           <div data-control="itd"></div><div data-control="alpha"></div>
           <div data-control="slope"></div>
+          <label class="switch"><span>CORRECTED XTC</span><input class="toggle" type="checkbox" role="switch" data-setting="algorithm"></label>
         </div>
       </section>
     </div>
@@ -63,10 +74,6 @@
       <h2>NAE PCA FIELD</h2>
       <canvas id="radar" aria-label="Live principal direction and loudspeaker field"></canvas>
       <div class="response" data-control="response"></div>
-      <div class="field-options">
-        <label class="switch"><input type="checkbox" data-setting="reset"> Reset DSP history on new track</label>
-        <label class="switch"><input type="checkbox" data-setting="algorithm"> Corrected XTC</label>
-      </div>
     </section>
   </div>
 </main>

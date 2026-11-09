@@ -11,10 +11,14 @@ const controls = {
 const inputs = new Map();
 const player = document.querySelector("#player");
 const status = document.querySelector("#status");
-const renderAhead = document.querySelector("#render-ahead");
+const bufferFill = document.querySelector("#buffer-fill");
+const bufferValue = document.querySelector("#buffer-value");
+const bufferGauge = document.querySelector(".buffer-gauge");
+const bufferTrack = document.querySelector(".buffer-track");
 const canvas = document.querySelector("#radar");
 const ctx = canvas.getContext("2d");
 const levelMeter = document.querySelector("#level");
+const peakTrack = document.querySelector(".peak-track");
 const pending = new Map();
 let settings = {};
 let telemetry = {};
@@ -62,12 +66,14 @@ for (const node of document.querySelectorAll("[data-control]")) {
     const key = node.dataset.control;
     const [title, min, max, step] = controls[key];
     const label = document.createElement("label");
+    const caption = document.createElement("span");
+    caption.textContent = title;
     const value = document.createElement("output");
     const range = document.createElement("input");
     Object.assign(range, {type: "range", min, max, step});
     range.setAttribute("aria-label", title);
     range.dataset.setting = key;
-    label.append(document.createTextNode(title), value, range);
+    label.append(caption, value, range);
     node.append(label);
     if (key === "trim") enableKnobDrag(range, step);
 }
@@ -111,6 +117,22 @@ async function rpc(id, command) {
     return data.result;
 }
 
+function showBuffer(seconds) {
+    bufferFill.value = seconds ?? 0;
+    bufferTrack.style.setProperty("--fill", `${100 * bufferFill.value / bufferFill.max}%`);
+    const warning = seconds == null ? "" : seconds < bufferFill.low ? "critical" :
+        seconds < bufferFill.high ? "low" : "";
+    if (warning) bufferGauge.dataset.warning = warning;
+    else delete bufferGauge.dataset.warning;
+    const reading = bufferFill.value.toFixed(1) + (seconds > bufferFill.max ? "+" : "");
+    const display = `${reading} s / ${bufferFill.max} s`;
+    if (bufferValue.textContent !== display) bufferValue.textContent = display;
+    const description = `${reading} seconds${warning ? `, ${warning} buffer` : ""}`;
+    if (bufferFill.getAttribute("aria-valuetext") !== description) {
+        bufferFill.setAttribute("aria-valuetext", description);
+    }
+}
+
 async function refresh() {
     if (busy || !player.value || document.hidden) return;
     busy = true;
@@ -133,13 +155,10 @@ async function refresh() {
             !settings.enabled ? "Routing disabled" :
             telemetry.settingsPending ? "Setting change queued for playback" :
             applied ? `Settings applied at ${playbackTime(telemetry.settingsAppliedAt)}` :
-            telemetry.rate ? "Routing active" : "Routing enabled · waiting for a processed stream";
+            telemetry.rate ? "Routing active" : "Routing enabled\nWaiting for a processed stream";
         if (status.textContent !== message) status.textContent = message;
         status.classList.toggle("applied", Boolean(result.available && settings.enabled && applied));
-        if (renderAhead) {
-            renderAhead.textContent = telemetry.bufferAhead >= .1
-                ? `${telemetry.bufferAhead.toFixed(1)} s rendered ahead` : "";
-        }
+        showBuffer(telemetry.bufferAhead);
         sampledCpu = telemetry.rate ? Math.max(sampledCpu, telemetry.cpu || 0) : 0;
         sampledPeak = telemetry.rate ? Math.max(sampledPeak, telemetry.peak || 0) : 0;
     } catch {
@@ -147,6 +166,7 @@ async function refresh() {
             telemetry = {};
             sampledCpu = sampledPeak = 0;
             status.textContent = "Lyrion connection unavailable";
+            showBuffer();
         }
     } finally {
         busy = false;
@@ -201,6 +221,7 @@ function paint(now) {
     lastPaint = now;
     displayedLevel = easeMeter(displayedLevel, targetLevel, dt);
     levelMeter.value = displayedLevel;
+    peakTrack.style.setProperty("--fill", `${100 * displayedLevel}%`);
     updateReadouts(now);
     const width = canvas.clientWidth;
     const height = canvas.clientHeight;
@@ -285,7 +306,7 @@ function paint(now) {
 player.addEventListener("change", () => {
     telemetry = {};
     sampledCpu = sampledPeak = displayedCpu = displayedLevel = targetLevel = 0;
-    if (renderAhead) renderAhead.textContent = "";
+    showBuffer();
     status.classList.remove("applied");
     for (const input of inputs.values()) input.disabled = true;
     refresh();
