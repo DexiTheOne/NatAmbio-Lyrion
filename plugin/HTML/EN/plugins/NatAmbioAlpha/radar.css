@@ -7,7 +7,7 @@ body { margin: 0; min-width: 300px; color: var(--cream); font: 14px Inter, sans-
 header { min-height: 82px; display: flex; align-items: center; gap: 24px; padding: 4px 0 13px 20px; margin-bottom: 9px; border-bottom: 1px solid #66645c }
 .wordmark h1 { font: bold 34px Inter, sans-serif; letter-spacing: -0.055em; margin: 0 0 4px }
 .wordmark span { color: #d6d1c5; letter-spacing: .24em; font-size: 10px; white-space: nowrap }
-.technical { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; --meter-yellow: #e8bd58; --meter-red: #ed694f }
+.technical { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; --meter-green: #78c78b; --meter-green-track: #2d4535; --meter-yellow: #e8bd58; --meter-red: #ed694f }
 .header-box { height: 88px; padding: 8px 10px; border: 1px solid #514e45; border-radius: 6px; background: #171715; box-shadow: inset 0 1px 4px #0008 }
 .trim-knob { display: grid; align-items: center }
 [data-control].trim-knob label { grid-template-columns: auto; justify-items: center; gap: 3px; white-space: nowrap; font-size: 10px }
@@ -32,16 +32,16 @@ header { min-height: 82px; display: flex; align-items: center; gap: 24px; paddin
     --red-start: 98.3333%;
     background:
         linear-gradient(to right,
-            #b8b1a1 0 min(var(--yellow-start), var(--fill, 0%)),
+            var(--meter-green) 0 min(var(--yellow-start), var(--fill, 0%)),
             var(--meter-yellow) 0 min(var(--red-start), var(--fill, 0%)),
             var(--meter-red) 0 var(--fill, 0%), transparent 0),
-        linear-gradient(to right, #373735 0 var(--yellow-start), #56472b 0 var(--red-start), #68352e 0);
+        linear-gradient(to right, var(--meter-green-track) 0 var(--yellow-start), #56472b 0 var(--red-start), #68352e 0);
 }
 .buffer-track { grid-column: 1 / -1 }
-.buffer-track::after { background: linear-gradient(to right, var(--buffer-color, #b8b1a1) var(--fill, 0%), #373735 0) }
+.buffer-track::after { background: linear-gradient(to right, var(--buffer-color, var(--meter-green)) var(--fill, 0%), var(--buffer-track-color, var(--meter-green-track)) 0) }
 .buffer-gauge[data-warning="low"] { --buffer-color: var(--meter-yellow) }
 .buffer-gauge[data-warning="critical"] { --buffer-color: var(--meter-red) }
-.buffer-gauge[data-warning] .buffer-track::after { border-color: var(--buffer-color) }
+.buffer-gauge[data-warning] .buffer-track::after { --buffer-track-color: #373735; border-color: var(--buffer-color) }
 .buffer-gauge[data-warning] #buffer-value { color: var(--buffer-color) }
 @media (forced-colors: active) {
     .meter-track meter { opacity: 1 }
@@ -83,12 +83,44 @@ h2 { font-size: 14px; font-weight: normal; letter-spacing: .04em; border-bottom:
 :is(.controls [data-control], .response) :is(label > span, output),
 .sliders .switch > span { text-decoration: underline; text-underline-offset: .15em }
 [data-control] input { grid-column: span 2; accent-color: var(--red); width: 90%; margin: 17px 5% 5px; cursor: pointer }
-input[type=range] { appearance: none; background: linear-gradient(90deg, var(--red) 0 var(--position, 0%), #aca79b var(--position, 0%)); height: 4px; border-radius: 2px }
-.faders input[type=range] { width: 4px; height: 255px; margin: 0; background: linear-gradient(0deg, var(--red) 0 var(--position, 0%), #aca79b var(--position, 0%)) }
-input[type=range]::-webkit-slider-thumb { appearance: none; width: 13px; height: 24px; border: 1px solid #aca495; border-radius: 4px; background: linear-gradient(90deg, #f7f3e9 43%, var(--red) 44% 56%, #ece6db 57%); box-shadow: 0 2px 0 #b8b1a3 }
-.faders input::-webkit-slider-thumb { width: 28px; height: 17px; background: linear-gradient(#f7f3e9 43%, var(--red) 44% 56%, #ece6db 57%) }
-input[type=range]::-moz-range-thumb { width: 12px; height: 22px; border: 1px solid #aca495; border-radius: 4px; background: #eee8db }
-.faders input::-moz-range-thumb { width: 26px; height: 16px }
+input[type=range] {
+    --thumb-width: 13px;
+    --thumb-height: 24px;
+    --thumb-angle: 90deg;
+    --thumb-finish: linear-gradient(var(--thumb-angle), #f7f3e9 43%, var(--red) 44% 56%, #ece6db 57%);
+    appearance: none;
+    background: linear-gradient(90deg, var(--red) 0 var(--position, 0%), #aca79b var(--position, 0%));
+    height: 4px;
+    border-radius: 2px;
+}
+.faders input[type=range] {
+    --thumb-width: 28px;
+    --thumb-height: 17px;
+    --thumb-angle: 180deg;
+    width: 4px;
+    height: 255px;
+    margin: 0;
+    background: linear-gradient(0deg, var(--red) 0 var(--position, 0%), #aca79b var(--position, 0%));
+}
+input[type=range]::-webkit-slider-thumb {
+    appearance: none;
+    box-sizing: border-box;
+    width: var(--thumb-width);
+    height: var(--thumb-height);
+    border: 1px solid #aca495;
+    border-radius: 4px;
+    background: var(--thumb-finish);
+    box-shadow: 0 2px 0 #b8b1a3;
+}
+input[type=range]::-moz-range-thumb {
+    box-sizing: border-box;
+    width: var(--thumb-width);
+    height: var(--thumb-height);
+    border: 1px solid #aca495;
+    border-radius: 4px;
+    background: var(--thumb-finish);
+    box-shadow: 0 2px 0 #b8b1a3;
+}
 .field { display: flex; flex-direction: column }
 .field canvas { display: block; flex: 1 1 0px; contain: size; width: 100%; min-height: 220px; margin: 4px 0 11px }
 .response { margin: 0 10% }
