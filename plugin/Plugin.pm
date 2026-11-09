@@ -297,6 +297,26 @@ sub getState {
     $request->setStatusDone();
 }
 
+sub refreshPlayback {
+    my ($client, $base) = @_;
+    return if $client->isSynced;
+    my $controller = $client->controller or return;
+    my $buffering = $controller->buffering;
+    return unless $controller->isPlaying(1) || $controller->isPaused
+        || ($buffering && ($controller->isStreaming || $controller->isStreamout));
+    my $song = $controller->playingSong or return;
+    my $stream = $song->pluginData('natambioalpha.stream') or return;
+    # The song hook assigns IDs before we know which conversion path Lyrion used.
+    return unless -s "$base.$stream.timeline";
+    my $duration = $song->duration;
+    return unless $duration && $song->canSeek;
+    my $position = $buffering ? ($song->startOffset || 0) : $controller->playingSongElapsed;
+    return unless defined $position && $position >= 0 && $position < $duration;
+
+    # Lyrion closes the old stream and clears queued audio as part of a seek.
+    $controller->jumpToTime($position);
+}
+
 sub setControl {
     my $request = shift;
     my $client = $request->client;
@@ -310,14 +330,22 @@ sub setControl {
         return;
     }
     my $cp = $prefs->client($client);
-    ++$revision{$base} if $liveAudioControl{$key};
+    my $previous = $cp->get($key);
+    my $audioChanged = $liveAudioControl{$key} && $value != ($previous // $controls{$key}[0]);
+    ++$revision{$base} if $audioChanged;
     $cp->set($key, $value + 0);
     if ($key eq 'enabled' || $key eq 'reset') {
         ++$epoch{$base};
         unlink "$base.history", "$base.telemetry";
     }
-    writeSettings($client, $base);
+    unless (writeSettings($client, $base)) {
+        --$revision{$base} if $audioChanged;
+        $cp->set($key, $previous);
+        $request->setStatusBadConfig();
+        return;
+    }
     configurePlayer($client) if $key eq 'enabled';
+    refreshPlayback($client, $base) if $audioChanged && settings($client)->{enabled};
     $request->setStatusDone();
 }
 
