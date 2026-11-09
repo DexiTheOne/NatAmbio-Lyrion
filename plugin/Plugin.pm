@@ -182,16 +182,26 @@ sub configurePlayer {
 
     # The command arguments are filled in by Lyrion after it chooses this player's profile.
     # Encode FLAC for FLAC-capable hardware and honor a player's negotiated rate limit.
-    for my $source (qw(flc wav aif mp3 ogg)) {
+    for my $source (qw(flc wav aif mp3 ogg sof)) {
         my $key = "$source-flc-*-$id";
-        my $command = '[sox] -q $FILE$ -t au -b 24 - $START$ $RESAMPLE$ | '
+        # SpotOn sends raw PCM on stdin and handles seeking in its daemon.
+        my $spotOn = $source eq 'sof';
+        my $input = $spotOn
+            ? '-t raw --encoding signed-integer --bits $SAMPLESIZE$ --endian little -r 44100 -c 2 -'
+            : '$FILE$';
+        my $trim = $spotOn ? '' : ' $START$';
+        my $seek = $spotOn ? ' $SEEK$' : $trim;
+        my $output = $spotOn ? '-t flac -C 0 -b 16 -D -' : '-t flac -C 0 -';
+        my $command = "[sox] -q $input -t au -b 24 -$trim" . ' $RESAMPLE$ | '
             . shellQuote($helper) . ' ' . shellQuote($base)
-            . ' $START$ --stream=0 | [sox] -q -t au - -t flac -C 0 -';
+            . "$seek --stream=0 | [sox] -q -t au - $output";
         my $old = $Slim::Player::TranscodingHelper::commandTable{$key};
         my $oldCaps = $Slim::Player::TranscodingHelper::capabilities{$key};
         $rules{$id}{$key} = [$command, $old, $oldCaps];
         $Slim::Player::TranscodingHelper::commandTable{$key} = $command;
-        $Slim::Player::TranscodingHelper::capabilities{$key} = {
+        $Slim::Player::TranscodingHelper::capabilities{$key} = $spotOn ? {
+            I => 'noArgs', D => 'RESAMPLE=rate %d', E => { NOSTART => 'I' },
+        } : {
             F => 'noArgs', T => 'START=trim %s', U => 'START=trim %s =%u',
             D => 'RESAMPLE=rate %d', E => {},
         };
@@ -212,10 +222,12 @@ sub installSongHook {
         my $stream = ++$streamSequence;
         local %Slim::Player::TranscodingHelper::commandTable =
             %Slim::Player::TranscodingHelper::commandTable;
+        my $seek = ($song->seekdata || $song->startOffset) ? ' --seek' : '';
         for my $key (keys %$rules) {
             my $command = \$Slim::Player::TranscodingHelper::commandTable{$key};
             next unless $$command && $$command eq $rules->{$key}[0];
             $$command =~ s/--stream=0/--stream=$stream/;
+            $$command =~ s/ \$SEEK\$/$seek/;
         }
         my @result = $open->(@_);
         if ($result[0]) {

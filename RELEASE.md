@@ -1,3 +1,3 @@
-NatAmbio Alpha 0.1.7 fixes intermittent delays when switching tracks on Lyrion. A new stream can start while the previous DSP helper closes. When the previous track has already saved its DSP history, the next track can still use it. If the streams overlap before that history is ready, the new track starts with fresh DSP state.
+NatAmbio Alpha 0.1.8 processes SpotOn streams when the player's SpotOn streaming format is set to FLAC. After updating, enable Alpha for the player and start a new Spotify track.
 
 If NatAmbio Alpha is already installed, use Lyrion's Manage Plugins page to apply the update.
