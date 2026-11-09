@@ -116,6 +116,23 @@ public:
     ~TrackLock() { close(fd); }
     TrackLock(const TrackLock&) = delete;
     TrackLock& operator=(const TrackLock&) = delete;
+
+    void claim() const
+    {
+        const auto owner = getpid();
+        if (pwrite(fd, &owner, sizeof owner, 0) != sizeof owner)
+            throw std::runtime_error("cannot record player stream owner");
+    }
+
+    bool isOwner() const
+    {
+        pid_t owner{};
+        const auto bytes = pread(fd, &owner, sizeof owner, 0);
+        if (bytes < 0)
+            throw std::runtime_error("cannot read player stream owner");
+        return bytes == sizeof owner && owner == getpid();
+    }
+
 private:
     int fd;
 };
@@ -155,25 +172,21 @@ public:
         ++count;
     }
 
-    template <typename Feed>
-    void restore(const std::string& path, int rate, double epoch, Feed feed)
+    std::vector<Stereo> restore(const std::string& path, int rate, double epoch) const
     {
         std::ifstream file(path, std::ios::binary);
         if (!file)
-            return;
+            return {};
         Header header{};
         file.read(reinterpret_cast<char*>(&header), sizeof header);
         if (!file || header.rate != rate || header.epoch != epoch
             || header.frames > buffer.size())
-            return;
+            return {};
         std::vector<Stereo> prefix(header.frames);
         file.read(reinterpret_cast<char*>(prefix.data()), prefix.size() * sizeof(Stereo));
         if (!file)
-            return;
-        for (const auto& frame : prefix) {
-            add(frame);
-            feed(frame);
-        }
+            return {};
+        return prefix;
     }
 
     void save(const std::string& path, int rate, double epoch) const
@@ -229,14 +242,22 @@ public:
     void run(const Au& au, bool discontinuity)
     {
         const auto historyPath = state + ".history";
-        if (!discontinuity && !settings.value("reset", 0, 0, 1)) {
-            // Prime the finite history from PCM before rendering this track.
-            history.restore(historyPath, rate, epoch, [this](Stereo frame) {
-                enqueue(frame, false);
-            });
-            render(false);
+        std::vector<Stereo> prefix;
+        {
+            TrackLock lock(state + ".lock");
+            if (lock.isOwner()) {
+                if (!discontinuity && !settings.value("reset", 0, 0, 1))
+                    prefix = history.restore(historyPath, rate, epoch);
+                std::remove(historyPath.c_str());
+            }
         }
-        std::remove(historyPath.c_str());
+
+        // Warm up without holding the lock or waiting for the prior stream.
+        for (const auto& frame : prefix) {
+            history.add(frame);
+            enqueue(frame, false);
+        }
+        render(false);
 
         writeHeader(au);
         for (std::uint64_t i = 0; au.indefinite || i < au.frames; ++i) {
@@ -259,9 +280,12 @@ public:
         if (!std::cout)
             throw std::runtime_error("audio output closed");
         report();
-        settings.reload(state + ".settings");
-        if (epoch == settings.value("epoch", 0, 0, 1e15))
-            history.save(historyPath, rate, epoch);
+        {
+            TrackLock lock(state + ".lock");
+            settings.reload(state + ".settings");
+            if (lock.isOwner() && epoch == settings.value("epoch", 0, 0, 1e15))
+                history.save(historyPath, rate, epoch);
+        }
     }
 
 private:
@@ -416,7 +440,7 @@ private:
              << ",\"major\":" << pca.eigenvaluePrimary << ",\"minor\":" << pca.eigenvalueSecondary
              << ",\"window\":" << pca.windowSamples << "}";
         const auto data = json.str();
-        if (timeline && data.size() < timelineRecordBytes) {
+        if (timeline.is_open() && timeline && data.size() < timelineRecordBytes) {
             auto record = data;
             record.resize(timelineRecordBytes - 1, ' ');
             record.push_back('\n');
@@ -430,6 +454,9 @@ private:
             timeline.flush();
             return;
         }
+        TrackLock lock(state + ".lock");
+        if (!lock.isOwner())
+            return;
         std::ofstream file(state + ".telemetry.new", std::ios::trunc);
         file << data << '\n';
         file.close();
@@ -469,7 +496,7 @@ private:
 int main(int argc, char** argv)
 {
     if (argc == 2 && std::string(argv[1]) == "--version") {
-        std::cout << "NatAmbio Alpha 0.1.6\n";
+        std::cout << "NatAmbio Alpha 0.1.7\n";
         return 0;
     }
     if (argc < 2) {
@@ -480,8 +507,6 @@ int main(int argc, char** argv)
     std::ios::sync_with_stdio(false);
     std::cin.tie(nullptr);
     try {
-        const Au au = readHeader(std::cin);
-        TrackLock lock(std::string(argv[1]) + ".lock");
         std::string stream;
         bool discontinuity = false;
         for (int i = 2; i < argc; ++i) {
@@ -495,7 +520,14 @@ int main(int argc, char** argv)
                 discontinuity = true;
             }
         }
-        Renderer renderer(au.rate, argv[1], stream);
+        const std::string state = argv[1];
+        {
+            // Only the latest helper can update shared history and fallback telemetry.
+            TrackLock lock(state + ".lock");
+            lock.claim();
+        }
+        const Au au = readHeader(std::cin);
+        Renderer renderer(au.rate, state, stream);
         renderer.run(au, discontinuity);
         return 0;
     } catch (const std::exception& error) {

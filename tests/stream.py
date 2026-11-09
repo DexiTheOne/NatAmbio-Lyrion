@@ -18,7 +18,7 @@ def au(samples, rate, length=None):
 
 def render(base, rate, frames, *args, length=None):
     data = subprocess.run([binary, str(base), *args], input=au(frames, rate, length),
-                          capture_output=True, check=True).stdout
+                          capture_output=True, check=True, timeout=10).stdout
     assert struct.unpack(">6I", data[:24]) == (
         0x2E736E64, 32, len(frames) * 6 if length is None else length, 4, rate, 2
     )
@@ -61,6 +61,27 @@ with tempfile.TemporaryDirectory() as tmp:
     assert render(base, rate, signal, "trim", "3") == clean
     settings.write_text("reset 0\nepoch 2\n")
     assert render(base, rate, signal) == clean
+
+    # Keep an old helper alive while a new track starts and finishes on the same player.
+    previous_signal = signal[:1536]
+    previous_timeline = base.with_suffix(".219.timeline")
+    with subprocess.Popen([binary, str(base), "--stream=219"], stdin=subprocess.PIPE,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE) as previous:
+        previous.stdin.write(au(previous_signal, rate, 0xFFFFFFFF))
+        previous.stdin.flush()
+        for _ in range(100):
+            if previous_timeline.exists():
+                break
+            time.sleep(.01)
+        else:
+            raise AssertionError("Previous helper did not start")
+        render(base, 44100, wave(44100, 8192), "--stream=220")
+        history_path = base.with_suffix(".history")
+        next_history = history_path.read_bytes()
+        output, errors = previous.communicate(timeout=5)
+        assert previous.returncode == 0, errors
+        assert len(output) == 32 + len(previous_signal) * 6
+        assert history_path.read_bytes() == next_history, "Old helper replaced the new track's history"
 
     settings.write_text("reset 1\nnae_bypass 1\nxtc_bypass 1\ntrim 6\n")
     loud = [(left * 2, right * 2) for left, right in wave(rate, rate // 5)]
