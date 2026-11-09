@@ -43,7 +43,7 @@ my %controls = (
     window => [5, 1, 20], trim => [-3, -12, 6],
     azimuth => [30, 10, 30], itd => [260, 80, 300], ild => [14, 3, 20],
     alpha => [1.8, 1, 2.5], slope => [200, 60, 500], algorithm => [1, 0, 1],
-    response => [150, 0, 600],
+    response => [100, 0, 600],
 );
 
 sub getDisplayName { 'PLUGIN_NATAMBIO_ALPHA' }

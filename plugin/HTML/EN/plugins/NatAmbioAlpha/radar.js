@@ -214,6 +214,34 @@ function updateReadouts(now) {
     document.getElementById("peak-label").classList.toggle("clipped", current && Boolean(telemetry.clipped));
 }
 
+function smoothStep(value, low, high) {
+    const fraction = Math.max(0, Math.min(1, (value - low) / (high - low)));
+    return fraction * fraction * (3 - 2 * fraction);
+}
+
+function makeCloudTarget(telemetry) {
+    if (!telemetry.rate || !telemetry.valid || !(telemetry.major > 0)) {
+        return {angle: 0, spread: 1, opacity: 0};
+    }
+
+    const power = telemetry.major + telemetry.minor;
+    const confidence = (telemetry.major - telemetry.minor) / power;
+    const directionWeight = smoothStep(confidence, .08, .50);
+    const mid = Math.abs(telemetry.mid);
+    const midWeight = smoothStep(mid, .04, .16);
+    // Side is L-R and positive canvas rotation points right. Near pure Side,
+    // the axis has no stable left/right bearing, so show a centered, broad cloud.
+    const bearing = Math.atan2(-telemetry.side * Math.sign(telemetry.mid || 1), mid);
+    const spread = Math.sqrt(Math.max(0, telemetry.minor / telemetry.major));
+    // Half the summed Mid/Side variance is the combined L/R variance.
+    const levelDb = 10 * Math.log10(power / 2);
+    return {
+        angle: bearing * directionWeight * midWeight,
+        spread: Math.max(spread, 1 - midWeight),
+        opacity: smoothStep(levelDb, -72, -48),
+    };
+}
+
 let cloud = {angle: 0, spread: 1, opacity: 0, left: 0, right: 0};
 let lastPaint = 0;
 function paint(now) {
@@ -249,11 +277,8 @@ function paint(now) {
     }
 
     const current = Boolean(telemetry.rate);
-    const valid = current && telemetry.valid && telemetry.major > 0;
     const target = {
-        angle: valid ? Math.atan2(telemetry.side * Math.sign(telemetry.mid || 1), Math.abs(telemetry.mid)) : 0,
-        spread: valid ? Math.sqrt(Math.max(0, telemetry.minor / telemetry.major)) : 1,
-        opacity: Number(valid), left: current ? telemetry.left : 0, right: current ? telemetry.right : 0,
+        ...makeCloudTarget(telemetry), left: current ? telemetry.left : 0, right: current ? telemetry.right : 0,
     };
     const decay = settings.response ? 1 - Math.exp(-dt / settings.response) : 1;
     for (const key of ["angle", "spread", "opacity"]) cloud[key] += (target[key] - cloud[key]) * decay;

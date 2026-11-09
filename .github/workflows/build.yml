@@ -21,7 +21,7 @@ jobs:
       - name: Test audio and browser JavaScript
         run: |
           ctest --test-dir build --output-on-failure
-          node --check plugin/HTML/EN/plugins/NatAmbioAlpha/radar.js
+          node tests/radar.cjs
       - name: Package
         env:
           REPOSITORY: ${{ github.repository }}
