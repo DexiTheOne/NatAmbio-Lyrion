@@ -119,6 +119,12 @@ public:
     void reset();
     void copyStateFrom(const NaeProcessor& other) noexcept;
     PcaAnalysis getPcaAnalysis() const noexcept { return pcaAnalysis; }
+    void setPcaReporting(bool enabled) noexcept
+    {
+        pcaReporting = enabled;
+        if (!enabled)
+            pcaAnalysis = {};
+    }
     
     /**
      * @brief Get latency contribution from NAE (in samples).
@@ -171,6 +177,7 @@ private:
     double eig1_v1[2] = {1.0, 0.0};            // Eigenvector 1
     double eig1_v2[2] = {0.0, 1.0};            // Eigenvector 2
     PcaAnalysis pcaAnalysis;
+    bool pcaReporting = true;
     
     /**
      * @brief Compute 2x2 symmetric eigen decomposition.

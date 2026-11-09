@@ -2,7 +2,7 @@
 <extension>
   <name>PLUGIN_NATAMBIO_ALPHA</name>
   <module>Plugins::NatAmbioAlpha::Plugin</module>
-  <version>0.1.12</version>
+  <version>0.1.13</version>
   <description>PLUGIN_NATAMBIO_ALPHA_DESC</description>
   <optionsURL>plugins/NatAmbioAlpha/index.html</optionsURL>
   <defaultState>enabled</defaultState>

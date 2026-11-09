@@ -239,6 +239,9 @@ void NaeProcessor::accumulateCovariance(const float* left, const float* right,
 
         eigen_2x2_symmetric(cov_xx, cov_xy, cov_yy, &eig1, &eig2, eig1_v1, eig1_v2);
 
+        if (!pcaReporting)
+            return;
+
         const bool finite = std::isfinite(cov_xx) && std::isfinite(cov_xy)
             && std::isfinite(cov_yy) && std::isfinite(eig1) && std::isfinite(eig2)
             && std::isfinite(eig1_v1[0]) && std::isfinite(eig1_v1[1]);

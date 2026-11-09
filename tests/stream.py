@@ -31,6 +31,14 @@ def wave(rate, length):
              int(7500 * math.sin(2 * math.pi * 904 * i / rate))) for i in range(length)]
 
 
+def wait_for(condition, message):
+    for _ in range(300):
+        if condition():
+            return
+        time.sleep(.01)
+    raise AssertionError(message)
+
+
 with tempfile.TemporaryDirectory() as tmp:
     base = Path(tmp) / "player"
     settings = base.with_suffix(".settings")
@@ -62,6 +70,14 @@ with tempfile.TemporaryDirectory() as tmp:
     settings.write_text("reset 0\nepoch 2\n")
     assert render(base, rate, signal) == clean
 
+    lease = base.with_suffix(".viewing")
+
+    def renew(session, seconds=30):
+        replacement = lease.with_suffix(".new")
+        replacement.write_text(f"{session} {time.time() + seconds}\n")
+        replacement.replace(lease)
+
+    renew(1)
     # Keep an old helper alive while a new track starts and finishes on the same player.
     previous_signal = signal[:1536]
     previous_timeline = base.with_suffix(".219.timeline")
@@ -70,7 +86,7 @@ with tempfile.TemporaryDirectory() as tmp:
         previous.stdin.write(au(previous_signal, rate, 0xFFFFFFFF))
         previous.stdin.flush()
         for _ in range(100):
-            if previous_timeline.exists():
+            if previous_timeline.with_suffix(".rendering").exists():
                 break
             time.sleep(.01)
         else:
@@ -135,3 +151,45 @@ with tempfile.TemporaryDirectory() as tmp:
             assert record["revision"] == 17
         else:
             assert record["revision"] == 18 and record["appliedFrame"] == latest["appliedFrame"]
+
+    # Watch, leave, and return during one stream. PCM stays identical throughout.
+    lease.unlink()
+    settings.write_text("reset 1\n")
+    frames = wave(rate, 5 * 8192)
+    track = au(frames, rate)
+    path = base.with_suffix(".223.timeline")
+    with tempfile.TemporaryFile() as pcm, subprocess.Popen(
+            [binary, str(base), "--stream=223"], stdin=subprocess.PIPE,
+            stdout=pcm, stderr=subprocess.PIPE) as live:
+        def feed(start, end):
+            live.stdin.write(track[24 + start * 4:24 + end * 4])
+            live.stdin.flush()
+
+        live.stdin.write(track[:24])
+        feed(0, 8192)
+        wait_for(lambda: pcm.tell() >= 32768, "Unwatched audio did not render")
+        assert not path.exists()
+
+        renew(2)
+        time.sleep(.25)
+        feed(8192, 16384)
+        wait_for(lambda: path.exists() and path.stat().st_size >= 512,
+                 "Watching did not start telemetry")
+        wait_for(lambda: pcm.tell() >= 81920, "Watched audio did not render")
+
+        renew(2, seconds=-1)
+        time.sleep(.25)
+        before = path.read_bytes()
+        assert json.loads(before[:512])["viewerSession"] == 2
+        feed(16384, 32768)
+        wait_for(lambda: pcm.tell() >= 180224, "Audio stopped after the lease expired")
+        assert path.read_bytes() == before, "Expired viewer still generated telemetry"
+
+        renew(3)
+        time.sleep(.25)
+        _, errors = live.communicate(track[24 + 32768 * 4:], timeout=10)
+        assert live.returncode == 0, errors
+        latest = json.loads(path.read_bytes()[:512])
+        assert latest["viewerSession"] == 3 and latest["frames"] == len(frames)
+        pcm.seek(32)
+        assert pcm.read() == render(base, rate, frames)

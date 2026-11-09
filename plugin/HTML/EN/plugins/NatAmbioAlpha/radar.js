@@ -155,7 +155,9 @@ async function refresh() {
             !settings.enabled ? "Routing disabled" :
             telemetry.settingsPending ? "Setting change queued for playback" :
             applied ? `Settings applied at ${playbackTime(telemetry.settingsAppliedAt)}` :
-            telemetry.rate ? "Routing active" : "Routing enabled\nWaiting for a processed stream";
+            telemetry.rate ? "Routing active" :
+            result.rendering ? "Routing active\nWaiting for meter data at the playhead" :
+            "Routing enabled\nWaiting for a processed stream";
         if (status.textContent !== message) status.textContent = message;
         status.classList.toggle("applied", Boolean(result.available && settings.enabled && applied));
         showBuffer(telemetry.bufferAhead);

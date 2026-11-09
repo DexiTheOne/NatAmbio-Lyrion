@@ -25,8 +25,11 @@ my %rules;
 my %epoch;
 my %revision;
 my %streams;
+my %viewers;
 my ($originalSongOpen, $songOpenHook);
 my $streamSequence = int(time() * 1000);
+my $viewerSequence = $streamSequence;
+use constant VIEWER_LEASE_SECONDS => 3;
 my %liveAudioControl = map { $_ => 1 } qw(
     bypass nae_bypass xtc_bypass front ambience preamp trim azimuth itd ild alpha slope algorithm
 );
@@ -50,7 +53,8 @@ sub initPlugin {
     make_path($root, { mode => 0700 }) unless -d $root;
     if (opendir my $dir, $root) {
         for my $file (readdir $dir) {
-            unlink catfile($root, $file) if $file =~ /\A[\da-f-]{17}\.\d{1,18}\.timeline\z/;
+            unlink catfile($root, $file) if $file =~
+                /\A[\da-f-]{17}\.(?:\d{1,18}\.(?:timeline|rendering)|viewing|telemetry)\z/;
         }
         closedir $dir;
     }
@@ -95,6 +99,8 @@ sub dashboardPage {
 
 sub shutdownPlugin {
     $active = 0;
+    unlink "$_.viewing" for keys %viewers;
+    %viewers = ();
     if ($songOpenHook && Slim::Player::Song->can('open') == $songOpenHook) {
         no warnings 'redefine';
         *Slim::Player::Song::open = $originalSongOpen;
@@ -114,7 +120,9 @@ sub playbackStopped {
     return unless -d $root && $ready && settings($client)->{enabled};
     ++$epoch{$base};
     unlink "$base.history", "$base.telemetry";
-    unlink "$base.$_.timeline" for @{delete($streams{$base}) || []};
+    for my $stream (@{delete($streams{$base}) || []}) {
+        unlink "$base.$stream.timeline", "$base.$stream.rendering";
+    }
     writeSettings($client, $base);
 }
 
@@ -237,7 +245,7 @@ sub installSongHook {
             push @$entries, $stream;
             while (@$entries > 4) {
                 my $expired = shift @$entries;
-                unlink "$base.$expired.timeline";
+                unlink "$base.$expired.timeline", "$base.$expired.rendering";
             }
         }
         return wantarray ? @result : $result[-1];
@@ -254,14 +262,33 @@ sub timelineRecord {
     return ref $record eq 'HASH' ? $record : undef;
 }
 
+sub renewViewer {
+    my ($base) = @_;
+    my $now = time();
+    my $viewer = $viewers{$base};
+    return $viewer->{session} if $viewer && $now < $viewer->{renew};
+    my $session = $viewer && $now < $viewer->{expires} ? $viewer->{session} : ++$viewerSequence;
+    my $expires = $now + VIEWER_LEASE_SECONDS;
+    my ($fh, $tmp) = eval { tempfile('viewer-XXXXXX', DIR => $root, UNLINK => 0) };
+    return unless $fh;
+    print {$fh} "$session $expires\n";
+    unless (close($fh) && rename($tmp, "$base.viewing")) {
+        unlink $tmp;
+        return;
+    }
+    $viewers{$base} = { session => $session, expires => $expires, renew => $now + 1 };
+    return $session;
+}
+
 sub playbackTelemetry {
-    my ($client, $base) = @_;
+    my ($client, $base, $session) = @_;
     my $controller = $client->controller or return;
     return unless $controller->isPlaying(1) || $controller->isPaused;
     my $song = $controller->playingSong or return;
     my $stream = $song->pluginData('natambioalpha.stream') or return;
     return unless open my $fh, '<:raw', "$base.$stream.timeline";
     my $latest = timelineRecord($fh, 0) or return;
+    return unless ($latest->{viewerSession} || 0) == $session;
     my $rate = $latest->{rate} or return;
     my $start = $song->startOffset || 0;
     my $elapsed = ($controller->playingSongElapsed || 0) - $start;
@@ -274,7 +301,8 @@ sub playbackTelemetry {
         --$slot;
         $telemetry = timelineRecord($fh, 1 + ($slot % 5400));
     }
-    return unless $telemetry && $telemetry->{slot} == $slot;
+    return unless $telemetry && $telemetry->{slot} == $slot
+        && ($telemetry->{viewerSession} || 0) == $session && $telemetry->{frames} <= $frames;
     $telemetry->{bufferAhead} = $latest->{frames} > $frames ? ($latest->{frames} - $frames) / $rate : 0;
     $telemetry->{settingsPending} = ($revision{$base} || 0) != $telemetry->{revision} ? 1 : 0;
     if (!$telemetry->{settingsPending} && $telemetry->{revision} && defined $telemetry->{appliedFrame}) {
@@ -290,10 +318,17 @@ sub getState {
     my $client = $request->client;
     my $base = $active && statePath($client);
     unless ($base) { $request->setStatusBadParams(); return; }
-    $request->addResult('settings', settings($client));
+    my $settings = settings($client);
+    $request->addResult('settings', $settings);
     $request->addResult('available', $ready);
-    my $telemetry = playbackTelemetry($client, $base);
-    $request->addResult('telemetry', $telemetry) if $telemetry;
+    if ($ready && $settings->{enabled}) {
+        my $song = $client->controller && $client->controller->playingSong;
+        my $stream = $song && $song->pluginData('natambioalpha.stream');
+        $request->addResult('rendering', 1) if $stream && -f "$base.$stream.rendering";
+        my $session = renewViewer($base);
+        my $telemetry = $session && playbackTelemetry($client, $base, $session);
+        $request->addResult('telemetry', $telemetry) if $telemetry;
+    }
     $request->setStatusDone();
 }
 
@@ -307,7 +342,7 @@ sub refreshPlayback {
     my $song = $controller->playingSong or return;
     my $stream = $song->pluginData('natambioalpha.stream') or return;
     # The song hook assigns IDs before we know which conversion path Lyrion used.
-    return unless -s "$base.$stream.timeline";
+    return unless -f "$base.$stream.rendering";
     my $duration = $song->duration;
     return unless $duration && $song->canSeek;
     my $position = $buffering ? ($song->startOffset || 0) : $controller->playingSongElapsed;
@@ -345,6 +380,10 @@ sub setControl {
         return;
     }
     configurePlayer($client) if $key eq 'enabled';
+    if ($key eq 'enabled' && !$value) {
+        delete $viewers{$base};
+        unlink "$base.viewing";
+    }
     refreshPlayback($client, $base) if $audioChanged && settings($client)->{enabled};
     $request->setStatusDone();
 }

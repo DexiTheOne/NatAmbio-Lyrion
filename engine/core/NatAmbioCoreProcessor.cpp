@@ -186,6 +186,14 @@ NaeProcessor::PcaAnalysis NatAmbioCoreProcessor::getNaePcaAnalysis() const noexc
                                     : NaeProcessor::PcaAnalysis {};
 }
 
+void NatAmbioCoreProcessor::setPcaReporting(bool enabled) noexcept
+{
+    if (nae_processor)
+        nae_processor->setPcaReporting(enabled);
+    if (fading_nae_processor)
+        fading_nae_processor->setPcaReporting(enabled);
+}
+
 void NatAmbioCoreProcessor::process(const float* left_in, const float* right_in,
                                     float* left_out, float* right_out,
                                     int numSamples,

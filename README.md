@@ -27,13 +27,15 @@ Changing Bypass, NAE Bypass, XTC Bypass, or another live DSP control reopens see
 
 Radar2 selects recorded DSP snapshots using the player's Lyrion playhead. The page shows the estimated render lead and indicates when live settings are queued behind buffered audio. Once the player reaches the revised audio, the status shows the track position where the settings applied. Exact display alignment depends on the timing reported by the player.
 
+Meter collection runs while at least one visible dashboard is polling the player. It stops within a few seconds after the last dashboard closes, becomes hidden, or switches players. When you return, the meters wait for newly measured audio to reach the playhead. Audio playback continues throughout.
+
 ## Build and package
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
-python3 tools/package.py build/natambio-alpha https://example.org/releases/download/v0.1.12
+python3 tools/package.py build/natambio-alpha https://example.org/releases/download/v0.1.13
 ```
 
 The package script writes a versioned ZIP and Lyrion repository XML with its SHA-1 checksum. Tagging a commit with the version in `plugin/install.xml` builds and publishes both release assets on GitHub.

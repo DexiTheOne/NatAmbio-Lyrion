@@ -80,6 +80,7 @@ public:
 
     int getLatencySamples(const NatAmbioStereoConfig& config) const;
     NaeProcessor::PcaAnalysis getNaePcaAnalysis() const noexcept;
+    void setPcaReporting(bool enabled) noexcept;
 
 #if NATAMBIO_VERIFICATION_BUILD
     void setCapture(StageCapture* target) noexcept { capture_target_ = target; }

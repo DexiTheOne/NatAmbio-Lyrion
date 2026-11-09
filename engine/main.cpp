@@ -4,6 +4,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cstdio>
+#include <fcntl.h>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -22,6 +23,7 @@ namespace {
 constexpr int blockSize = 256;
 constexpr int timelineSlots = 30 * 180;
 constexpr int timelineRecordBytes = 512;
+constexpr auto viewerCheckInterval = std::chrono::milliseconds(200);
 using Clock = std::chrono::steady_clock;
 using Stereo = std::array<float, 2>;
 
@@ -226,8 +228,13 @@ public:
         settings.reload(state + ".settings");
         config.nae.steps_length = blockSize * static_cast<int>(settings.value("window", 5, 1, 20));
         updateSettings(true);
-        if (!stream.empty())
-            timeline.open(state + "." + stream + ".timeline", std::ios::binary | std::ios::trunc);
+        if (!stream.empty()) {
+            const auto streamPath = state + "." + stream;
+            timelinePath = streamPath + ".timeline";
+            // Lyrion uses this marker for live DSP changes, independently of metering.
+            std::ofstream rendering(streamPath + ".rendering");
+        }
+        processor.setPcaReporting(false);
         latency = processor.getLatencySamples(config);
         outputRevision = pendingRevision;
         outputGeometry = config.xtc;
@@ -279,7 +286,9 @@ public:
         std::cout.flush();
         if (!std::cout)
             throw std::runtime_error("audio output closed");
-        report();
+        updateViewer(true);
+        if (metering && framesRendered > firstMeterFrame)
+            report();
         {
             TrackLock lock(state + ".lock");
             settings.reload(state + ".settings");
@@ -289,6 +298,43 @@ public:
     }
 
 private:
+    void updateViewer(bool force = false)
+    {
+        const auto now = Clock::now();
+        if (!force && now < nextViewerCheck)
+            return;
+        nextViewerCheck = now + viewerCheckInterval;
+
+        std::uint64_t session = 0;
+        if (timelinePath.empty()) {
+            // Keep standalone helper telemetry available to existing callers.
+            session = 1;
+        } else {
+            std::ifstream lease(state + ".viewing");
+            double expires = 0;
+            const auto wallTime = std::chrono::duration<double>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            if (!(lease >> session >> expires) || expires <= wallTime)
+                session = 0;
+        }
+        if (session == viewerSession)
+            return;
+
+        viewerSession = session;
+        metering = session != 0;
+        processor.setPcaReporting(metering);
+        if (metering) {
+            cpu = peak = 0;
+            energy = {};
+            peakHold = 0;
+            clipped = false;
+            overBudget = 0;
+            firstMeterFrame = framesRendered;
+            nextReport = framesRendered;
+            previousSlot = std::numeric_limits<std::uint64_t>::max();
+        }
+    }
+
     void updateSettings(bool initial)
     {
         const double preamp = settings.value("preamp", 0, -18, 0);
@@ -346,15 +392,17 @@ private:
     {
         if (queued == 0)
             return;
-        const auto started = Clock::now();
+        if (output)
+            updateViewer();
+        const auto started = metering ? Clock::now() : Clock::time_point{};
         if (output && framesRendered >= nextSettingsRead) {
             settings.reload(state + ".settings");
             updateSettings(false);
             nextSettingsRead = framesRendered + rate / 15;
         }
-        const double dspStarted = output ? threadCpuSeconds() : 0;
+        const double dspStarted = metering ? threadCpuSeconds() : 0;
         processor.process(left.data(), right.data(), wetLeft.data(), wetRight.data(), queued, config);
-        if (output) {
+        if (metering) {
             const double blockSeconds = static_cast<double>(queued) / rate;
             const double load = (threadCpuSeconds() - dspStarted) / blockSeconds;
             cpu += (load - cpu) * -std::expm1(-blockSeconds);
@@ -380,18 +428,21 @@ private:
                 appliedFrame = framesRendered;
                 outputGeometry = config.xtc;
             }
-            if (peakHold > 0)
-                --peakHold;
-            else
-                peak *= peakRelease;
+            if (metering) {
+                if (peakHold > 0)
+                    --peakHold;
+                else
+                    peak *= peakRelease;
+            }
             ++framesRendered;
         }
-        if (output) {
+        if (metering) {
             const double load = std::chrono::duration<double>(Clock::now() - started).count()
                 * rate / queued;
             if (load > 1)
                 ++overBudget;
-            if (framesRendered >= nextReport) {
+            updateViewer();
+            if (metering && framesRendered > firstMeterFrame && framesRendered >= nextReport) {
                 report();
                 nextReport = (framesRendered / reportInterval() + 1) * reportInterval();
             }
@@ -403,15 +454,17 @@ private:
     {
         const double processed = std::isfinite(wet) ? wet * trim : 0;
         const double out = processed * (1 - bypass) + drySample * bypass;
-        const double magnitude = std::abs(processed);
-        if (magnitude >= peak) {
-            peak = magnitude;
-            peakHold = rate / 12;
+        if (metering) {
+            const double magnitude = std::abs(processed);
+            if (magnitude >= peak) {
+                peak = magnitude;
+                peakHold = rate / 12;
+            }
+            clipped = clipped || magnitude >= 1.0;
+            const double squared = out * out;
+            energy[channel] += (squared - energy[channel])
+                * (squared > energy[channel] ? rmsAttack : rmsRelease);
         }
-        clipped = clipped || magnitude >= 1.0;
-        const double squared = out * out;
-        energy[channel] += (squared - energy[channel])
-            * (squared > energy[channel] ? rmsAttack : rmsRelease);
         const auto quantized = static_cast<std::int32_t>(
             std::llround(std::clamp(out, -1.0, 8388607.0 / 8388608) * 8388608));
         writeWord(std::cout, static_cast<std::uint32_t>(quantized), 3);
@@ -426,6 +479,7 @@ private:
         const auto slot = framesRendered / reportInterval();
         json << "{\"rate\":" << rate << ",\"frames\":" << framesRendered
              << ",\"slot\":" << slot << ",\"revision\":" << outputRevision
+             << ",\"viewerSession\":" << viewerSession
              << ",\"appliedFrame\":" << appliedFrame
              << ",\"azimuth\":" << outputGeometry.azimuth_deg
              << ",\"itd\":" << outputGeometry.itd_us
@@ -440,6 +494,8 @@ private:
              << ",\"major\":" << pca.eigenvaluePrimary << ",\"minor\":" << pca.eigenvalueSecondary
              << ",\"window\":" << pca.windowSamples << "}";
         const auto data = json.str();
+        if (!timelinePath.empty() && !timeline.is_open())
+            timeline.open(timelinePath, std::ios::binary | std::ios::trunc);
         if (timeline.is_open() && timeline && data.size() < timelineRecordBytes) {
             auto record = data;
             record.resize(timelineRecordBytes - 1, ' ');
@@ -454,6 +510,8 @@ private:
             timeline.flush();
             return;
         }
+        if (!timelinePath.empty())
+            return;
         TrackLock lock(state + ".lock");
         if (!lock.isOwner())
             return;
@@ -466,6 +524,7 @@ private:
 
     int rate;
     std::string state;
+    std::string timelinePath;
     std::ofstream timeline;
     NatAmbioCoreProcessor processor;
     History history;
@@ -485,6 +544,9 @@ private:
     double peakRelease = 0, rmsAttack = 0, rmsRelease = 0;
     int peakHold = 0;
     bool clipped = false;
+    bool metering = false;
+    Clock::time_point nextViewerCheck{};
+    std::uint64_t viewerSession = 0, firstMeterFrame = 0;
     std::uint64_t appliedFrame = 0;
     std::uint64_t previousSlot = std::numeric_limits<std::uint64_t>::max();
     int outputRevision = 0, pendingRevision = 0, revisionDelay = 0;
@@ -496,7 +558,7 @@ private:
 int main(int argc, char** argv)
 {
     if (argc == 2 && std::string(argv[1]) == "--version") {
-        std::cout << "NatAmbio Alpha 0.1.12\n";
+        std::cout << "NatAmbio Alpha 0.1.13\n";
         return 0;
     }
     if (argc < 2) {
