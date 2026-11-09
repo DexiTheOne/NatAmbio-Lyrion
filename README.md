@@ -9,11 +9,11 @@ Server-side stereo NAE and XTC processing for Lyrion Music Server 9 on Linux x86
    `https://github.com/DexiTheOne/NatAmbio-Lyrion/releases/latest/download/repo.xml`
 
 2. Enable **NatAmbio Alpha**, apply, and restart Lyrion when prompted.
-3. Open **NatAmbio Alpha** from the Lyrion web interface's plugins section. Select a player and turn on **Enable Alpha**. Start a new track to use the new conversion path.
+3. Open **NatAmbio Alpha** from the Lyrion web interface's plugins section. Select a player and turn on **Enable Routing**. Start a new track to apply the routing change.
 
 The player needs to accept lossless FLAC, and the server needs Lyrion's bundled SoX or a compatible SoX on its path. Local FLAC, WAV, AIFF, MP3, and Ogg Vorbis can use the DSP route. Actual decoding support follows the server's SoX build. Keep the target player independent of sync groups for the initial release. For a source that still plays natively, check Lyrion's File Types settings and the player's supported formats. The dashboard shows whether the helper is rendering.
 
-For SpotOn with Soloist, select **FLAC** as the streaming format in SpotOn's settings for the target player. Enable Alpha for that player and start a new Spotify track.
+For SpotOn with Soloist, select **FLAC** as the streaming format in SpotOn's settings for the target player. Turn on **Enable Routing** for that player and start a new Spotify track.
 
 ## Controls
 
@@ -33,7 +33,7 @@ Radar2 selects recorded DSP snapshots using the player's Lyrion playhead. The pa
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
-python3 tools/package.py build/natambio-alpha https://example.org/releases/download/v0.1.10
+python3 tools/package.py build/natambio-alpha https://example.org/releases/download/v0.1.11
 ```
 
 The package script writes a versioned ZIP and Lyrion repository XML with its SHA-1 checksum. Tagging a commit with the version in `plugin/install.xml` builds and publishes both release assets on GitHub.

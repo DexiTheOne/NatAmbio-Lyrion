@@ -130,10 +130,10 @@ async function refresh() {
         telemetry = result.telemetry || {};
         const applied = Number.isFinite(telemetry.settingsAppliedAt) && !telemetry.settingsPending;
         const message = !result.available ? "DSP helper or SoX unavailable" :
-            !settings.enabled ? "Alpha disabled" :
+            !settings.enabled ? "Routing disabled" :
             telemetry.settingsPending ? "Setting change queued for playback" :
             applied ? `Settings applied at ${playbackTime(telemetry.settingsAppliedAt)}` :
-            telemetry.rate ? "Following player" : "Alpha enabled · waiting for a processed stream";
+            telemetry.rate ? "Routing active" : "Routing enabled · waiting for a processed stream";
         if (status.textContent !== message) status.textContent = message;
         status.classList.toggle("applied", Boolean(result.available && settings.enabled && applied));
         if (renderAhead) {
