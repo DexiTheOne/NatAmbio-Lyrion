@@ -39,7 +39,12 @@ def wait_for(condition, message):
     raise AssertionError(message)
 
 
-with tempfile.TemporaryDirectory() as tmp:
+tmpfs = Path("/dev/shm")
+probe = subprocess.run([binary, "--is-tmpfs", str(tmpfs)], timeout=5)
+scratch = tmpfs if probe.returncode == 0 else None
+with tempfile.TemporaryDirectory(dir=scratch) as tmp:
+    missing = subprocess.run([binary, "--is-tmpfs", str(Path(tmp) / "missing")], timeout=5)
+    assert missing.returncode == 1
     base = Path(tmp) / "player"
     settings = base.with_suffix(".settings")
     for rate in (44100, 48000, 88200, 96000, 176400, 192000):
@@ -58,6 +63,7 @@ with tempfile.TemporaryDirectory() as tmp:
             assert render(base, rate, signal) != baseline, control
         data = json.loads(base.with_suffix(".telemetry").read_text())
         assert data["rate"] == rate and 0 <= data["frames"] <= len(signal)
+        assert not base.with_suffix(".history").exists()
 
     rate = 48000
     signal = wave(rate, 8113)
@@ -65,6 +71,7 @@ with tempfile.TemporaryDirectory() as tmp:
     clean = render(base, rate, signal)
     assert render(base, rate, signal) == clean
     settings.write_text("reset 0\nepoch 1\n")
+    assert render(base, rate, signal) == clean
     assert render(base, rate, signal) != clean
     assert render(base, rate, signal, "trim", "3") == clean
     settings.write_text("reset 0\nepoch 2\n")
@@ -79,6 +86,7 @@ with tempfile.TemporaryDirectory() as tmp:
 
     renew(1)
     # Keep an old helper alive while a new track starts and finishes on the same player.
+    settings.write_text("reset 0\nepoch 2\n")
     previous_signal = signal[:1536]
     previous_timeline = base.with_suffix(".219.timeline")
     with subprocess.Popen([binary, str(base), "--stream=219"], stdin=subprocess.PIPE,
@@ -121,7 +129,7 @@ with tempfile.TemporaryDirectory() as tmp:
     assert latest["revision"] == before["revision"] == 17
     assert latest["azimuth"] == before["azimuth"] == 22
 
-    settings.write_text("reset 1\nrevision 17\n")
+    settings.write_text("reset 0\nrevision 17\n")
     track = au(wave(rate, rate // 3), rate)
     split = 24 + 1536 * 4
     live_path = base.with_suffix(".222.timeline")
@@ -140,6 +148,7 @@ with tempfile.TemporaryDirectory() as tmp:
         output, errors = live.communicate(track[split:], timeout=10)
         assert live.returncode == 0, errors
         assert len(output) == 32 + rate // 3 * 6
+        assert not base.with_suffix(".history").exists()
     records = live_path.read_bytes()
     latest = json.loads(records[:512])
     initial = json.loads(records[512:1024])

@@ -3,6 +3,9 @@ package Plugins::NatAmbioAlpha::Plugin;
 use strict;
 use warnings;
 use base qw(Slim::Plugin::Base);
+use Cwd qw(abs_path);
+use Digest::SHA qw(sha256_hex);
+use Fcntl qw(S_ISDIR);
 use File::Basename qw(dirname);
 use File::Path qw(make_path);
 use File::Spec::Functions qw(catdir catfile);
@@ -45,19 +48,26 @@ my %controls = (
 
 sub getDisplayName { 'PLUGIN_NATAMBIO_ALPHA' }
 
+sub runtimeDirectory {
+    my ($cache) = @_;
+    my $shared = '/dev/shm';
+    return unless system({$helper} $helper, '--is-tmpfs', $shared) == 0;
+
+    # Separate Lyrion instances and protect settings from other users.
+    my $id = sha256_hex(abs_path($cache) // $cache);
+    my $path = catdir($shared, "natambio-alpha-$>-$id");
+    mkdir $path, 0700;
+    my (undef, undef, $mode, undef, $owner) = lstat($path);
+    return unless defined $mode && S_ISDIR($mode) && $owner == $>
+        && ($mode & 0777) == 0700 && -w $path && -x $path
+        && system({$helper} $helper, '--is-tmpfs', $path) == 0;
+    return $path;
+}
+
 sub initPlugin {
     my $class = shift;
     $class->SUPER::initPlugin(@_);
     $active = 1;
-    $root = catdir(Slim::Utils::OSDetect::dirsFor('cache'), 'NatAmbioAlpha');
-    make_path($root, { mode => 0700 }) unless -d $root;
-    if (opendir my $dir, $root) {
-        for my $file (readdir $dir) {
-            unlink catfile($root, $file) if $file =~
-                /\A[\da-f-]{17}\.(?:\d{1,18}\.(?:timeline|rendering)|viewing|telemetry)\z/;
-        }
-        closedir $dir;
-    }
     $helper = catfile(dirname(__FILE__), 'Bin', 'natambio-alpha');
     # LMS's ZIP installer can remove the executable mode.
     chmod 0755, $helper if -f $helper && !-x $helper;
@@ -66,6 +76,21 @@ sub initPlugin {
         && open(my $version, '-|', $helper, '--version')) {
         my $banner = <$version> // '';
         $ready = 1 if close($version) && $banner =~ /\A NatAmbio[ ]Alpha[ ]/x;
+    }
+
+    my $cache = Slim::Utils::OSDetect::dirsFor('cache');
+    $root = $ready && runtimeDirectory($cache);
+    unless ($root) {
+        $root = catdir($cache, 'NatAmbioAlpha');
+        warn "NatAmbio Alpha: writable tmpfs unavailable, using $root for runtime files\n" if $ready;
+        make_path($root, { mode => 0700 }) unless -d $root;
+    }
+    if (opendir my $dir, $root) {
+        for my $file (readdir $dir) {
+            unlink catfile($root, $file) if $file =~
+                /\A[\da-f-]{17}\.(?:\d{1,18}\.(?:timeline|rendering)|viewing|telemetry)\z/;
+        }
+        closedir $dir;
     }
 
     Slim::Control::Request::subscribe(\&clientConnected, [['client'], ['new', 'reconnect']]);
@@ -148,13 +173,18 @@ sub settings {
 sub writeSettings {
     my ($client, $base) = @_;
     my $settings = settings($client);
-    my ($fh, $tmp) = tempfile('settings-XXXXXX', DIR => $root, UNLINK => 0);
-    print {$fh} "epoch ", ($epoch{$base} //= int(time() * 1000)), "\n";
-    print {$fh} "revision ", ($revision{$base} || 0), "\n";
-    for my $key (sort keys %$settings) {
-        print {$fh} "$key $settings->{$key}\n";
+    my $contents = "epoch " . ($epoch{$base} //= int(time() * 1000)) . "\n"
+        . "revision " . ($revision{$base} || 0) . "\n"
+        . join('', map { "$_ $settings->{$_}\n" } sort keys %$settings);
+    if (open my $existing, '<', "$base.settings") {
+        local $/;
+        my $current = <$existing>;
+        return 1 if defined $current && $current eq $contents;
     }
-    return 1 if close($fh) && rename($tmp, "$base.settings");
+    my ($fh, $tmp) = eval { tempfile('settings-XXXXXX', DIR => $root, UNLINK => 0) };
+    return unless $fh;
+    my $written = print {$fh} $contents;
+    return 1 if close($fh) && $written && rename($tmp, "$base.settings");
     unlink $tmp;
     return;
 }
@@ -181,12 +211,13 @@ sub removeRules {
 }
 
 sub configurePlayer {
-    my $client = shift or return;
+    my ($client, $settingsWritten) = @_;
+    return unless $client;
     my $base = statePath($client) or return;
     my $id = lc($client->id);
     removeRules($id);
     return unless $active && $ready && settings($client)->{enabled};
-    return unless writeSettings($client, $base);
+    return unless $settingsWritten || writeSettings($client, $base);
 
     # The command arguments are filled in by Lyrion after it chooses this player's profile.
     # Encode FLAC for FLAC-capable hardware and honor a player's negotiated rate limit.
@@ -366,20 +397,22 @@ sub setControl {
     }
     my $cp = $prefs->client($client);
     my $previous = $cp->get($key);
-    my $audioChanged = $liveAudioControl{$key} && $value != ($previous // $controls{$key}[0]);
+    my $changed = $value != ($previous // $controls{$key}[0]);
+    my $audioChanged = $changed && $liveAudioControl{$key};
+    my $historyChanged = $changed && ($key eq 'enabled' || $key eq 'reset');
+    my $previousEpoch = $epoch{$base};
     ++$revision{$base} if $audioChanged;
-    $cp->set($key, $value + 0);
-    if ($key eq 'enabled' || $key eq 'reset') {
-        ++$epoch{$base};
-        unlink "$base.history", "$base.telemetry";
-    }
+    ++$epoch{$base} if $historyChanged;
+    $cp->set($key, $value + 0) if $changed;
     unless (writeSettings($client, $base)) {
         --$revision{$base} if $audioChanged;
-        $cp->set($key, $previous);
+        $epoch{$base} = $previousEpoch;
+        $cp->set($key, $previous) if $changed;
         $request->setStatusBadConfig();
         return;
     }
-    configurePlayer($client) if $key eq 'enabled';
+    unlink "$base.history", "$base.telemetry" if $historyChanged;
+    configurePlayer($client, 1) if $key eq 'enabled';
     if ($key eq 'enabled' && !$value) {
         delete $viewers{$base};
         unlink "$base.viewing";

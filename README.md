@@ -29,13 +29,15 @@ Radar2 selects recorded DSP snapshots using the player's Lyrion playhead. The pa
 
 Meter collection runs while at least one visible dashboard is polling the player. It stops within a few seconds after the last dashboard closes, becomes hidden, or switches players. When you return, the meters wait for newly measured audio to reach the playhead. Audio playback continues throughout.
 
+On Linux, NatAmbio uses a private directory under `/dev/shm` for transient files when the helper verifies that the directory is writable tmpfs. This includes meter timelines, viewer leases, DSP history, and the helper's working copy of its settings. Lyrion continues to store saved preferences in its regular preferences directory. If tmpfs is unavailable at startup, NatAmbio logs the fallback and uses `NatAmbioAlpha` under Lyrion's cache directory.
+
 ## Build and package
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
-python3 tools/package.py build/natambio-alpha https://example.org/releases/download/v0.1.13
+python3 tools/package.py build/natambio-alpha https://example.org/releases/download/v0.1.15
 ```
 
 The package script writes a versioned ZIP and Lyrion repository XML with its SHA-1 checksum. Tagging a commit with the version in `plugin/install.xml` builds and publishes both release assets on GitHub.

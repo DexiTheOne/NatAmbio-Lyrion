@@ -17,6 +17,10 @@
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#ifdef __linux__
+#include <linux/magic.h>
+#include <sys/vfs.h>
+#endif
 
 namespace {
 
@@ -292,7 +296,8 @@ public:
         {
             TrackLock lock(state + ".lock");
             settings.reload(state + ".settings");
-            if (lock.isOwner() && epoch == settings.value("epoch", 0, 0, 1e15))
+            if (lock.isOwner() && epoch == settings.value("epoch", 0, 0, 1e15)
+                && !settings.value("reset", 0, 0, 1))
                 history.save(historyPath, rate, epoch);
         }
     }
@@ -557,8 +562,16 @@ private:
 
 int main(int argc, char** argv)
 {
+    if (argc == 3 && std::string(argv[1]) == "--is-tmpfs") {
+#ifdef __linux__
+        struct statfs filesystem{};
+        if (statfs(argv[2], &filesystem) == 0 && filesystem.f_type == TMPFS_MAGIC)
+            return 0;
+#endif
+        return 1;
+    }
     if (argc == 2 && std::string(argv[1]) == "--version") {
-        std::cout << "NatAmbio Alpha 0.1.14\n";
+        std::cout << "NatAmbio Alpha 0.1.15\n";
         return 0;
     }
     if (argc < 2) {
